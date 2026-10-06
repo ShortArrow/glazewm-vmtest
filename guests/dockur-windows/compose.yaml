@@ -1,0 +1,30 @@
+services:
+  windows:
+    image: dockurr/windows:6.06
+    container_name: glazewm-vmtest-win11
+    environment:
+      VERSION: "11"
+      USERNAME: "fixture"
+      PASSWORD: "${GUEST_PASSWORD:?set GUEST_PASSWORD in .env}"
+      RAM_SIZE: "8G"
+      CPU_CORES: "4"
+      DISK_SIZE: "64G"
+      DISK_FMT: "qcow2"
+      MONITOR: "/storage/monitor.sock"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - storage:/storage
+      - ./oem:/oem:ro
+    ports:
+      - 127.0.0.1:8006:8006
+      - 127.0.0.1:2222:22
+    stop_grace_period: 2m
+    restart: "no"
+
+volumes:
+  storage:
+    name: glazewm-vmtest-win11-storage
