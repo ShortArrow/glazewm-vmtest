@@ -2,5 +2,6 @@
 //!
 //! Knows nothing about virtualization platforms or the SUT's implementation.
 
+pub mod invariant;
 pub mod settle;
 pub mod topology;
