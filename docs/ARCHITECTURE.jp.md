@@ -107,4 +107,4 @@
 ### SUTはホストでビルドする
 
 ゲストにツールチェーンを入れるとスナップショットが肥大し、ビルド環境の差が判定に混ざる。
-SUTはホストの`../glazewm`と`../zebar`から指定コミットでビルドし、成果物だけをゲストに渡す。渡すのはglazewmのバイナリと、zebarのバイナリ、そのフロントエンドのビルド結果、同梱リソースである。WebView2ランタイムはゲストイメージに入れておく。glazewmの設定は`GLAZEWM_CONFIG_PATH`で渡す。
+SUTはホストの`../glazewm`と`../zebar`から指定コミットでビルドし、成果物だけをゲストに渡す。渡すのはglazewmのバイナリと、zebarのバイナリ、そのフロントエンドのビルド結果、同梱リソースである。WebView2ランタイムと、glazewmのreleaseビルドがインポートするMicrosoft Visual C++再頒布可能パッケージ（`vcruntime140.dll`）は、ゲストイメージに入れておく。glazewmの設定は`GLAZEWM_CONFIG_PATH`で渡す。

@@ -107,4 +107,4 @@ When the same scenario yields different verdicts on different platforms, that di
 ### The SUT is built on the host
 
 A toolchain inside the guest would bloat the snapshot and mix build-environment differences into the verdict.
-The SUT is built on the host from `../glazewm` and `../zebar` at a specified commit, and only the output is handed to the guest: the glazewm binaries, and the zebar binary together with its frontend build and bundled resources. The guest image provides the WebView2 runtime. The glazewm configuration is passed through `GLAZEWM_CONFIG_PATH`.
+The SUT is built on the host from `../glazewm` and `../zebar` at a specified commit, and only the output is handed to the guest: the glazewm binaries, and the zebar binary together with its frontend build and bundled resources. The guest image provides the WebView2 runtime and the Microsoft Visual C++ redistributable, which glazewm's release build imports (`vcruntime140.dll`). The glazewm configuration is passed through `GLAZEWM_CONFIG_PATH`.
