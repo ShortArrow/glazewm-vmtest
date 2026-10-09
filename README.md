@@ -33,4 +33,4 @@ Every `*.md` has a Japanese translation beside it as `*.jp.md` ([README.jp.md](R
 
 ## Status
 
-Documentation only. Implementation follows the phases in docs/ROADMAP.md.
+Phase 0 of docs/ROADMAP.md is in progress. The domain model, the guest daemon and its client exist under crates/; spike results are in docs/spikes/. There is no scenario runner yet.
