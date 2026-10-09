@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub enum Request {
     Ping,
     Topology,
+    /// Runs `glazewm-cli` with these arguments in the interactive session.
+    RunGlazewmCli {
+        args: Vec<String>,
+    },
 }
 
 /// What the guest daemon answers.
@@ -15,8 +19,18 @@ pub enum Request {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
     Pong,
-    Topology { displays: Vec<DisplayDto> },
-    Error { message: String },
+    Topology {
+        displays: Vec<DisplayDto>,
+    },
+    /// What a command printed and how it ended; `exit_code` is `None` when it was terminated.
+    Output {
+        exit_code: Option<i32>,
+        stdout: String,
+        stderr: String,
+    },
+    Error {
+        message: String,
+    },
 }
 
 /// A rectangle in virtual-screen coordinates, in physical pixels.

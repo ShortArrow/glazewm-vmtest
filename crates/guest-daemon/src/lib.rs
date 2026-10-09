@@ -3,6 +3,8 @@
 #[cfg(windows)]
 pub mod win32;
 
+pub mod process;
+
 use std::io::{BufRead, Write};
 
 use vmtest_protocol::{DisplayDto, Request, Response, decode_line, encode_line};
@@ -13,12 +15,39 @@ pub trait TopologySource {
     fn displays(&self) -> Result<Vec<DisplayDto>, String>;
 }
 
+/// What a finished command printed and how it ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommandOutput {
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Runs the SUT's `glazewm-cli`.
+pub trait GlazewmCli {
+    /// Runs `glazewm-cli` with `args` and waits for it, or says why it could not be started.
+    fn run(&self, args: &[String]) -> Result<CommandOutput, String>;
+}
+
+/// Everything the daemon reads from or does in the guest.
+pub trait Guest: TopologySource + GlazewmCli {}
+
+impl<T: TopologySource + GlazewmCli> Guest for T {}
+
 /// Answers one request.
-pub fn handle(request: Request, topology: &dyn TopologySource) -> Response {
+pub fn handle(request: Request, guest: &dyn Guest) -> Response {
     match request {
         Request::Ping => Response::Pong,
-        Request::Topology => match topology.displays() {
+        Request::Topology => match guest.displays() {
             Ok(displays) => Response::Topology { displays },
+            Err(message) => Response::Error { message },
+        },
+        Request::RunGlazewmCli { args } => match guest.run(&args) {
+            Ok(output) => Response::Output {
+                exit_code: output.exit_code,
+                stdout: output.stdout,
+                stderr: output.stderr,
+            },
             Err(message) => Response::Error { message },
         },
     }
@@ -30,11 +59,11 @@ pub fn handle(request: Request, topology: &dyn TopologySource) -> Response {
 pub fn serve(
     reader: impl BufRead,
     mut writer: impl Write,
-    topology: &dyn TopologySource,
+    guest: &dyn Guest,
 ) -> std::io::Result<()> {
     for line in reader.lines() {
         let response = match decode_line::<Request>(&line?) {
-            Ok(request) => handle(request, topology),
+            Ok(request) => handle(request, guest),
             Err(error) => Response::Error {
                 message: error.to_string(),
             },
@@ -56,6 +85,78 @@ mod tests {
         fn displays(&self) -> Result<Vec<DisplayDto>, String> {
             self.0.clone()
         }
+    }
+
+    impl GlazewmCli for FixedTopology {
+        fn run(&self, _args: &[String]) -> Result<CommandOutput, String> {
+            Err("no glazewm-cli in this fake".into())
+        }
+    }
+
+    /// A guest whose `glazewm-cli` records its arguments and answers with a fixed result.
+    struct FakeCli {
+        answer: Result<CommandOutput, String>,
+        received: std::cell::RefCell<Vec<String>>,
+    }
+
+    impl TopologySource for FakeCli {
+        fn displays(&self) -> Result<Vec<DisplayDto>, String> {
+            Ok(vec![])
+        }
+    }
+
+    impl GlazewmCli for FakeCli {
+        fn run(&self, args: &[String]) -> Result<CommandOutput, String> {
+            *self.received.borrow_mut() = args.to_vec();
+            self.answer.clone()
+        }
+    }
+
+    #[test]
+    fn runs_glazewm_cli_with_the_requested_arguments() {
+        let output = CommandOutput {
+            exit_code: Some(0),
+            stdout: "{}".into(),
+            stderr: String::new(),
+        };
+        let guest = FakeCli {
+            answer: Ok(output),
+            received: Default::default(),
+        };
+
+        let response = handle(
+            Request::RunGlazewmCli {
+                args: vec!["query".into(), "monitors".into()],
+            },
+            &guest,
+        );
+
+        assert_eq!(*guest.received.borrow(), ["query", "monitors"]);
+        assert_eq!(
+            response,
+            Response::Output {
+                exit_code: Some(0),
+                stdout: "{}".into(),
+                stderr: String::new()
+            }
+        );
+    }
+
+    #[test]
+    fn answers_with_an_error_when_glazewm_cli_cannot_start() {
+        let guest = FakeCli {
+            answer: Err("glazewm-cli.exe not found".into()),
+            received: Default::default(),
+        };
+
+        let response = handle(Request::RunGlazewmCli { args: vec![] }, &guest);
+
+        assert_eq!(
+            response,
+            Response::Error {
+                message: "glazewm-cli.exe not found".into()
+            }
+        );
     }
 
     fn one_display() -> Vec<DisplayDto> {
