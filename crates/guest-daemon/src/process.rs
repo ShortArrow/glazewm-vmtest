@@ -12,8 +12,16 @@ pub struct ProcessGlazewmCli {
 
 impl GlazewmCli for ProcessGlazewmCli {
     fn run(&self, args: &[String]) -> Result<CommandOutput, String> {
-        let output = Command::new(&self.executable)
-            .args(args)
+        let mut command = Command::new(&self.executable);
+        command.args(args);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            /// `CREATE_NO_WINDOW`: a console child of a windowless daemon would otherwise open a console window on the desktop under test.
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+        let output = command
             .output()
             .map_err(|error| format!("cannot start {}: {error}", self.executable.display()))?;
         Ok(CommandOutput {
