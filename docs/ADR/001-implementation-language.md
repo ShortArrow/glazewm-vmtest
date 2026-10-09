@@ -4,10 +4,10 @@
 
 ## Context
 
-This decision covers the host-side runner and the guest agent. Test windows come from separate test-window applications, each written in its UI framework's own language (docs/ARCHITECTURE.md, "Adapters"), so no choice here has to cover every window kind.
+This decision covers the host-side runner and the guest daemon. Test windows come from separate test-window applications, each written in its UI framework's own language (docs/ARCHITECTURE.md, "Adapters"), so no choice here has to cover every window kind.
 
 The runner holds the domain model (`Topology`, `Scenario`, `Invariant`, `Baseline`), executes scenarios, and contains the adapters for Hyper-V, Docker (dockur/windows), and RDP / VNC clients. It needs a type system strong enough to model the domain and a unit-test framework for test-first work.
-The guest agent runs in the guest's interactive session; it generates CPU / memory / GPU load, starts the SUT and test-window applications, and reads the topology, window bounds, and process liveness.
+The guest daemon runs in the guest's interactive session; it generates CPU / memory / GPU load, starts the SUT and test-window applications, and reads the topology, window bounds, and process liveness.
 
 The forces:
 
@@ -17,7 +17,7 @@ The forces:
 
 ## Decision
 
-Rust for both the runner and the guest agent. Hyper-V is driven through WMI from Rust; operations WMI does not cover go through the Hyper-V PowerShell module in a child process, inside the Hyper-V adapter only.
+Rust for both the runner and the guest daemon. Hyper-V is driven through WMI from Rust; operations WMI does not cover go through the Hyper-V PowerShell module in a child process, inside the Hyper-V adapter only.
 
 ## Options not taken
 
@@ -28,7 +28,7 @@ Rust for both the runner and the guest agent. Hyper-V is driven through WMI from
 
 ## Consequences
 
-- The runner and the guest agent share one toolchain with glazewm and zebar. Test-window applications bring their own toolchains; they are built once into the guest image, not on every run.
+- The runner and the guest daemon share one toolchain with glazewm and zebar. Test-window applications bring their own toolchains; they are built once into the guest image, not on every run.
 - The runner parses glazewm's IPC JSON with its own types that tolerate unknown fields, instead of depending on `wm-common`, so it can observe SUT commits whose IPC schema differs from the newest one.
 - Whether WMI covers the Hyper-V operations is a phase 0 spike; anything missing is handled inside the Hyper-V adapter only.
 

@@ -18,7 +18,7 @@ The harness replaces that manual work with virtualization-platform operations, s
 |---|---|
 | SUT | System under test: glazewm and zebar built from specific commits |
 | Guest | The virtual machine (or the VM inside a container) that runs the SUT |
-| Guest agent | A program resident in the guest's interactive desktop session that starts the SUT and test windows and observes the guest on the harness's behalf |
+| Guest daemon | A program resident in the guest's interactive desktop session that starts the SUT and test windows and observes the guest on the harness's behalf |
 | Snapshot | A saved guest state that every run starts from (a checkpoint, in Hyper-V's terms) |
 | Topology | The set of displays the guest OS sees. Per display: identifier, bounds, working area, DPI, and whether it is primary |
 | Settled | The guest is settled when, for the settle window, the topology, the set of windows, and glazewm's IPC event stream have all been quiet |
@@ -86,7 +86,7 @@ Regression coverage comes first: the harness pins the current behaviour of glaze
 
 ## Non-functional requirements
 
-- Isolation: the harness never sends input to the developer's desktop session. Inside the guest, the guest agent acts within the guest's own interactive session.
+- Isolation: the harness never sends input to the developer's desktop session. Inside the guest, the guest daemon acts within the guest's own interactive session.
 - Headless: runs without opening a host window onto the guest display.
 - Reproducibility: the same scenario, SUT, and snapshot execute the same operation sequence. A verdict that varies between runs is reported as flaky, without attributing the cause to either the SUT or the harness.
 

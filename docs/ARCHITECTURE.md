@@ -18,7 +18,7 @@ Terms follow the "Terms" section of docs/PRD.md.
 ├───────────────────────────────────────────────────┤
 │ Adapters                                          │
 │   hyperv / dockur-windows / rdp-client /          │
-│   vnc-client / guest-agent                        │
+│   vnc-client / guest-daemon                        │
 └───────────────────────────────────────────────────┘
 ```
 
@@ -38,9 +38,9 @@ Dependencies point upward only. The domain knows nothing about virtualization pl
 
 `ScenarioRunner` executes in this order:
 
-1. Restore the guest from a snapshot via `Hypervisor`, and wait until the guest agent reports ready.
+1. Restore the guest from a snapshot via `Hypervisor`, and wait until the guest daemon reports ready.
 2. Apply the Given topology via `DisplayController`, and place the Given SUT configuration via `GuestExecutor`.
-3. `SutBuilder` builds the SUT on the host; `GuestExecutor` deploys it, and the guest agent starts it.
+3. `SutBuilder` builds the SUT on the host; `GuestExecutor` deploys it, and the guest daemon starts it.
 4. Wait until settled, then observe via `Observer`. This is the observation after step 0.
 5. For each When `Step`: execute it through its port, wait until settled, observe, evaluate the `Invariant`s, and either record the observation into a new `Baseline` or compare it with the existing one.
 6. Store logs, state dumps, screenshots, and the executed operation sequence in `ArtifactStore`.
@@ -55,15 +55,15 @@ Port responsibilities:
 | `DisplayController` | Change the guest topology per monitor |
 | `SessionController` | Connect and disconnect RDP / VNC clients; lock and unlock; sleep and resume |
 | `WorkloadController` | Start and stop CPU / memory / GPU load; create, hang, resume, and close test windows |
-| `GuestExecutor` | Transfer files to the guest and send commands to the guest agent |
+| `GuestExecutor` | Transfer files to the guest and send commands to the guest daemon |
 | `Observer` | Capture topology, window bounds, glazewm state, zebar window placement, process liveness, IPC responsiveness, and screenshots |
 
 ### Adapters
 
 Each virtualization platform implements `Hypervisor`, `DisplayController`, and `SessionController`, and the screenshot part of `Observer`.
-`GuestExecutor`, `WorkloadController`, and the rest of `Observer` go through the guest agent, so they are shared by every Windows guest.
+`GuestExecutor`, `WorkloadController`, and the rest of `Observer` go through the guest daemon, so they are shared by every Windows guest.
 
-The guest agent runs in the interactive session of the user that logs on automatically, and starts at logon. It starts the SUT and test windows, generates load, and reads the topology and window bounds from inside that session. Processes reach that session through scheduled tasks with an interactive logon type: `RunLevel Limited` for glazewm, zebar, and test windows at the user's integrity level, `RunLevel Highest` for elevated test windows. The guest image has UAC enabled, as a user's machine does; without it every process runs elevated and the privilege axis of the window kinds cannot be told apart.
+The guest daemon runs in the interactive session of the user that logs on automatically, and starts at logon. It starts the SUT and test windows, generates load, and reads the topology and window bounds from inside that session. Processes reach that session through scheduled tasks with an interactive logon type: `RunLevel Limited` for glazewm, zebar, and test windows at the user's integrity level, `RunLevel Highest` for elevated test windows. The guest image has UAC enabled, as a user's machine does; without it every process runs elevated and the privilege axis of the window kinds cannot be told apart.
 Test windows come from test-window applications, one per UI framework, each written in that framework's own language and built once into the guest image. Every test-window application accepts the same control protocol (create, hang, resume, close, with the window kind's other axes as parameters), so adding a framework means adding one application and no change to the runner.
 
 When an operation cannot be performed on a platform, or in the current session state (for example a per-monitor change while an RDP session owns the display), the adapter reports it as unsupported and the step is reported as skipped. A scenario whose steps were all skipped is reported as not run.
@@ -81,22 +81,22 @@ Observations are taken only once the guest has settled. The settle window is at 
 An invariant states what must hold whatever the SUT is meant to do; a violation is a bug. The invariants:
 
 - Once settled, glazewm's monitor count equals the guest OS display count, except that it stays at 1 while all displays are gone.
-- After every step the glazewm and zebar processes are alive, and glazewm answers an IPC query within the time limit. The guest agent measures this inside the guest, and the limit applies only while no load step is active.
+- After every step the glazewm and zebar processes are alive, and glazewm answers an IPC query within the time limit. The guest daemon measures this inside the guest, and the limit applies only while no load step is active.
 - A window that has stopped processing messages does not stop glazewm from managing the other windows.
 - Once settled, glazewm manages no window that no longer exists, and every window it manages is a top-level window.
 - Once settled, the actual bounds of every tiled window, read from the OS, lie within the working area of its monitor.
 - Once settled, for each monitor that the zebar configuration targets, exactly one bar window sits on that monitor.
 
 A baseline pins what the SUT currently does where nobody has specified what it should do; a deviation is a change in behaviour, to be judged by a person.
-Baselines compare a canonical form of the observation: monitors identified by position and bounds, workspaces by name, test windows by the identifier the guest agent gives them. Values that differ between identical runs — container UUIDs, window handles, timestamps — are dropped.
+Baselines compare a canonical form of the observation: monitors identified by position and bounds, workspaces by name, test windows by the identifier the guest daemon gives them. Values that differ between identical runs — container UUIDs, window handles, timestamps — are dropped.
 When a behaviour is later specified, the baseline for it is replaced by an invariant or by a unit test in the SUT's repository.
 
 `bind_to_monitor` is the case that drove this split. glazewm documents it as forcing a workspace onto a monitor "if it exists"; what happens otherwise is unspecified, so scenarios cover it with baselines. The index is a position among monitors sorted left to right, then top to bottom, not an identity of a physical monitor, and glazewm applies the binding when a monitor is added, not when one is removed or the monitors are rearranged. Baselines for scenarios that change the topology are therefore recorded per topology.
 
-### The guest agent acts inside the interactive session
+### The guest daemon acts inside the interactive session
 
 The harness never uses the host's keyboard and mouse; host input would interrupt the developer and rule out parallel runs.
-Inside the guest, a process started through SSH or PowerShell Direct gets a session with no interactive desktop: windows it creates are invisible, and display queries it makes describe that session rather than the console. The guest agent therefore lives in the interactive session and does the guest-side work there. SSH and PowerShell Direct are used only to deliver files and reach the agent.
+Inside the guest, a process started through SSH or PowerShell Direct gets a session with no interactive desktop: windows it creates are invisible, and display queries it makes describe that session rather than the console. The guest daemon therefore lives in the interactive session and does the guest-side work there. SSH and PowerShell Direct are used only to deliver files and reach the daemon.
 
 ### How topology changes is confined to adapters
 

@@ -16,8 +16,8 @@
 
 | Spike | What to find out |
 |---|---|
-| Interactive session | Does a user that logs on automatically, with the guest agent started at logon, give an agent that can start the SUT and test windows, read the topology, and capture the screen in that session? Can it start elevated windows without a UAC prompt? |
-| Snapshot type | Which Hyper-V checkpoint type (standard or production) restores to a logged-on session with the agent running, and what restoring does to the guest clock and display state |
+| Interactive session | Does a user that logs on automatically, with the guest daemon started at logon, give a daemon that can start the SUT and test windows, read the topology, and capture the screen in that session? Can it start elevated windows without a UAC prompt? |
+| Snapshot type | Which Hyper-V checkpoint type (standard or production) restores to a logged-on session with the daemon running, and what restoring does to the guest clock and display state |
 
 ### Topology changes
 
@@ -27,7 +27,7 @@ For each mechanism: can it present a monitor add/remove to the guest as a hot-pl
 |---|---|---|
 | In-guest virtual display driver (IddCx) | All | Can monitors be added and removed with in-guest commands alone? Does the driver need test-signing mode? On Hyper-V, whose synthetic video has a single output, this is the only per-monitor mechanism |
 | Multi-head virtual GPU (virtio-gpu, QXL) | QEMU/KVM | Does the Windows guest driver reflect enabling and disabling individual outputs? |
-| Resolution change inside the guest | All | Does a change made by the guest agent raise the same messages as a user's change? `Set-VMVideo` only sets which resolutions a Hyper-V guest supports, so it does not serve here |
+| Resolution change inside the guest | All | Does a change made by the guest daemon raise the same messages as a user's change? `Set-VMVideo` only sets which resolutions a Hyper-V guest supports, so it does not serve here |
 | RDP client monitor layout (`/multimon`, `/selectedmonitors`, resolution) | All | Can a reconnect present a different topology? Is a headless-capable RDP client (FreeRDP or similar) sufficient? |
 | VNC client connect/disconnect | QEMU/KVM | Can it be confirmed that the guest topology stays unchanged? |
 
@@ -37,7 +37,7 @@ For each mechanism: can it present a monitor add/remove to the guest as a hot-pl
 |---|---|
 | RDP takeover | What happens to the interactive session when an RDP client logs on as the same user: topology while RDP is active, topology of the disconnected session, and how the session returns to the console afterwards (`tscon` as SYSTEM or otherwise) |
 | Sleep | Which platforms let a guest enter and resume from sleep and deliver `PBT_APMSUSPEND` / `PBT_APMRESUMEAUTOMATIC` to it |
-| Lock and unlock | Can the guest agent lock the session, and how is it unlocked without host input? |
+| Lock and unlock | Can the guest daemon lock the session, and how is it unlocked without host input? |
 
 ### Observation
 
@@ -59,7 +59,7 @@ For each mechanism: can it present a monitor add/remove to the guest as a hot-pl
 
 | Question | Decide by |
 |---|---|
-| Control protocol between the guest agent and test-window applications (command-line arguments, named pipe, stdin JSON) | Before phase 1 |
+| Control protocol between the guest daemon and test-window applications (command-line arguments, named pipe, stdin JSON) | Before phase 1 |
 | How the SUT is specified (sibling directory path, git submodule, commit hash) | Before phase 1 |
 | Scenario format (YAML, in-code DSL) | Before phase 1 |
 | Baseline storage format | Before phase 1 |
