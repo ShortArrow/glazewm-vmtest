@@ -33,4 +33,4 @@ Every `*.md` has a Japanese translation beside it as `*.jp.md` ([README.jp.md](R
 
 ## Status
 
-Phase 0 of docs/ROADMAP.md is in progress. The domain model, the guest daemon and its client exist under crates/; spike results are in docs/spikes/. There is no scenario runner yet.
+Phase 0 of docs/ROADMAP.md is in progress. One scenario runs end to end against the dockur/windows guest: `cargo test -p vmtest-adapters --test live_dockur -- --ignored`, after building the guest daemon and glazewm as that test's header describes. Spike results are in docs/spikes/, glazewm behaviour found along the way in docs/findings/.
