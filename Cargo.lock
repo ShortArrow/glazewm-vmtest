@@ -108,6 +108,13 @@ name = "vmtest-domain"
 version = "0.1.0"
 
 [[package]]
+name = "vmtest-guest-client"
+version = "0.1.0"
+dependencies = [
+ "vmtest-protocol",
+]
+
+[[package]]
 name = "vmtest-guest-daemon"
 version = "0.1.0"
 dependencies = [
