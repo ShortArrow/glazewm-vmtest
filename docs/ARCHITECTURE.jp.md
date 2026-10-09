@@ -55,7 +55,7 @@
 | `DisplayController` | ゲストのトポロジーをモニター単位で変更する |
 | `SessionController` | RDP/VNCクライアントの接続と切断、ロックとアンロック、スリープと復帰 |
 | `WorkloadController` | CPU/メモリ/GPU負荷の開始と停止。テスト用ウィンドウの生成、応答停止、再開、破棄 |
-| `GuestExecutor` | ゲストへのファイル転送と、ゲストデーモンへのコマンド送信 |
+| `GuestExecutor` | ゲストへのファイル転送と、ゲストデーモンへの要求の送信。デーモンはゲスト内のTCPで待ち受け、1行に1つのJSONでやり取りする |
 | `Observer` | トポロジー、ウィンドウの矩形、glazewmの状態、zebarのウィンドウ配置、プロセスの生存、IPCの応答、スクリーンショットの取得 |
 
 ### Adapters
