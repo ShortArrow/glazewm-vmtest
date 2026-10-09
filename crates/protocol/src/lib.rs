@@ -8,10 +8,29 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub enum Request {
     Ping,
     Topology,
-    /// Runs `glazewm-cli` with these arguments in the interactive session.
-    RunGlazewmCli {
-        args: Vec<String>,
+    /// Runs a read-only `glazewm-cli query` in the interactive session.
+    ///
+    /// Only queries are expressible: free-form arguments would let anyone reaching the port run
+    /// `glazewm-cli command shell-exec` and so any program in the guest.
+    QueryGlazewm {
+        query: GlazewmQuery,
     },
+}
+
+/// The `glazewm-cli query` subjects the runner reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GlazewmQuery {
+    Monitors,
+}
+
+impl GlazewmQuery {
+    /// The `glazewm-cli` arguments that perform this query.
+    pub fn cli_args(self) -> [&'static str; 2] {
+        match self {
+            Self::Monitors => ["query", "monitors"],
+        }
+    }
 }
 
 /// What the guest daemon answers.
@@ -106,6 +125,13 @@ mod tests {
         let decoded: Response = decode_line(&encode_line(&response)).unwrap();
 
         assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn a_request_carrying_a_command_line_is_rejected() {
+        let line = r#"{"type":"run_glazewm_cli","args":["command","shell-exec","calc"]}"#;
+
+        assert!(decode_line::<Request>(line).is_err());
     }
 
     #[test]

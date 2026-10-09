@@ -27,7 +27,7 @@ The guest daemon listens on a TCP port inside the guest. The runner connects to 
 ## Consequences
 
 - The daemon has to be running before a scenario starts; the runner waits for it after every snapshot restore.
-- The port is published only on `127.0.0.1`, since the daemon starts processes and has no authentication.
+- The port is published only on `127.0.0.1`, since the daemon starts processes and has no authentication. Requests are typed, and none carries a command line or arguments to pass through: a pass-through would let anyone reaching the port, such as another container on the same Docker network, run any program in the guest.
 - Request and response types are shared between the runner and the daemon as one Rust crate.
 
 ## History

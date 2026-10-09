@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use vmtest_domain::scenario::Observation;
 use vmtest_guest_client::GuestDaemonClient;
-use vmtest_protocol::{Request, Response};
+use vmtest_protocol::{GlazewmQuery, Request, Response};
 use vmtest_runner::{Clock, DisplayController, GuestExecutor, Hypervisor, Observer};
 
 use crate::glazewm;
@@ -124,8 +124,8 @@ impl DockurGuest {
     }
 
     fn glazewm_monitor_count(&mut self) -> Result<usize, String> {
-        let args = vec!["query".into(), "monitors".into()];
-        match self.request(&Request::RunGlazewmCli { args })? {
+        let query = GlazewmQuery::Monitors;
+        match self.request(&Request::QueryGlazewm { query })? {
             Response::Output { stdout, .. } => glazewm::monitor_count(&stdout),
             other => Err(format!("unexpected answer to glazewm-cli: {other:?}")),
         }

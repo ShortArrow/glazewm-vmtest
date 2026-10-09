@@ -42,7 +42,7 @@ pub fn handle(request: Request, guest: &dyn Guest) -> Response {
             Ok(displays) => Response::Topology { displays },
             Err(message) => Response::Error { message },
         },
-        Request::RunGlazewmCli { args } => match guest.run(&args) {
+        Request::QueryGlazewm { query } => match guest.run(&query.cli_args().map(String::from)) {
             Ok(output) => Response::Output {
                 exit_code: output.exit_code,
                 stdout: output.stdout,
@@ -77,7 +77,7 @@ pub fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmtest_protocol::RectDto;
+    use vmtest_protocol::{GlazewmQuery, RectDto};
 
     struct FixedTopology(Result<Vec<DisplayDto>, String>);
 
@@ -113,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn runs_glazewm_cli_with_the_requested_arguments() {
+    fn runs_the_requested_query_through_glazewm_cli() {
         let output = CommandOutput {
             exit_code: Some(0),
             stdout: "{}".into(),
@@ -125,8 +125,8 @@ mod tests {
         };
 
         let response = handle(
-            Request::RunGlazewmCli {
-                args: vec!["query".into(), "monitors".into()],
+            Request::QueryGlazewm {
+                query: GlazewmQuery::Monitors,
             },
             &guest,
         );
@@ -149,7 +149,12 @@ mod tests {
             received: Default::default(),
         };
 
-        let response = handle(Request::RunGlazewmCli { args: vec![] }, &guest);
+        let response = handle(
+            Request::QueryGlazewm {
+                query: GlazewmQuery::Monitors,
+            },
+            &guest,
+        );
 
         assert_eq!(
             response,
