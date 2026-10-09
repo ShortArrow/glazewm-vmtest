@@ -1,4 +1,4 @@
-//! Reading what `glazewm-cli` prints.
+//! Reading what `glazewm-cli` prints, and preparing glazewm's configuration.
 //!
 //! The JSON is read without glazewm's own types, so that SUT commits with a different IPC schema can still be observed.
 
@@ -16,9 +16,51 @@ pub fn monitor_count(stdout: &str) -> Result<usize, String> {
         .ok_or_else(|| "glazewm's answer has no data.monitors array".into())
 }
 
+/// Returns glazewm's sample configuration with its startup and shutdown commands removed.
+///
+/// The sample starts and stops zebar, which a scenario that does not deploy zebar must not depend on.
+pub fn config_without_startup_commands(sample: &str) -> String {
+    sample
+        .split_inclusive('\n')
+        .map(|line| {
+            let key = line.trim_start();
+            if key.starts_with("startup_commands:") || key.starts_with("shutdown_commands:") {
+                let indent = &line[..line.len() - key.len()];
+                let name = &key[..key.find(':').unwrap_or(key.len())];
+                let ending = if line.ends_with('\n') { "\n" } else { "" };
+                format!("{indent}{name}: []{ending}")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empties_only_the_startup_and_shutdown_commands() {
+        let sample = "general:
+  startup_commands: ['shell-exec zebar']
+
+  shutdown_commands: ['shell-exec taskkill /IM zebar.exe /F']
+
+  config_reload_commands: []
+";
+
+        assert_eq!(
+            config_without_startup_commands(sample),
+            "general:
+  startup_commands: []
+
+  shutdown_commands: []
+
+  config_reload_commands: []
+"
+        );
+    }
 
     #[test]
     fn counts_the_monitors_in_a_successful_answer() {
