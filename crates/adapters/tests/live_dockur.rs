@@ -17,9 +17,10 @@ fn repository() -> PathBuf {
 
 /// glazewm's sample configuration without its startup and shutdown commands.
 fn quiet_glazewm_config() -> String {
-    let sample =
-        std::fs::read_to_string(repository().join("../glazewm/resources/assets/sample-config.yaml"))
-            .expect("glazewm is checked out beside this repository");
+    let sample = std::fs::read_to_string(
+        repository().join("../glazewm/resources/assets/sample-config.yaml"),
+    )
+    .expect("glazewm is checked out beside this repository");
     config_without_startup_commands(&sample)
 }
 
@@ -96,7 +97,10 @@ fn glazewm_answers_ipc_after_a_startup_command_fails() {
         "startup_commands: ['shell-exec vmtest-missing-program']",
         1,
     );
-    let guest = config("glazewm-config-missing-startup-program.yaml", &glazewm_config);
+    let guest = config(
+        "glazewm-config-missing-startup-program.yaml",
+        &glazewm_config,
+    );
 
     let verdicts = run(
         &scenario,

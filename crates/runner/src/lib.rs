@@ -343,9 +343,20 @@ mod tests {
         let mut scenario = scenario(vec![]);
         scenario.ipc_limit = Duration::from_millis(1500);
 
-        run(&scenario, &mut guest, &mut FakeClock(Duration::ZERO), SETTLE).unwrap();
+        run(
+            &scenario,
+            &mut guest,
+            &mut FakeClock(Duration::ZERO),
+            SETTLE,
+        )
+        .unwrap();
 
         assert!(!guest.ipc_limits.is_empty());
-        assert!(guest.ipc_limits.iter().all(|limit| *limit == Duration::from_millis(1500)));
+        assert!(
+            guest
+                .ipc_limits
+                .iter()
+                .all(|limit| *limit == Duration::from_millis(1500))
+        );
     }
 }

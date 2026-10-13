@@ -87,7 +87,10 @@ mod tests {
         let cli = ProcessGlazewmCli {
             executable: "powershell.exe".into(),
         };
-        cli.run(&["-NoProfile".into(), "-Command".into(), script.into()], limit)
+        cli.run(
+            &["-NoProfile".into(), "-Command".into(), script.into()],
+            limit,
+        )
     }
 
     #[test]
