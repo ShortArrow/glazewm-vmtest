@@ -13,7 +13,7 @@ fn main() -> std::io::Result<()> {
     use std::sync::Arc;
     use vmtest_guest_daemon::process::ProcessGlazewmCli;
     use vmtest_guest_daemon::win32::{self, Win32Topology};
-    use vmtest_guest_daemon::{CommandOutput, GlazewmCli, TopologySource, serve};
+    use vmtest_guest_daemon::{CliOutcome, GlazewmCli, TopologySource, serve};
     use vmtest_protocol::DisplayDto;
 
     struct LiveGuest {
@@ -27,8 +27,8 @@ fn main() -> std::io::Result<()> {
     }
 
     impl GlazewmCli for LiveGuest {
-        fn run(&self, args: &[String]) -> Result<CommandOutput, String> {
-            self.cli.run(args)
+        fn run(&self, args: &[String], limit: std::time::Duration) -> Result<CliOutcome, String> {
+            self.cli.run(args, limit)
         }
     }
 

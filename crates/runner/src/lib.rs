@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use vmtest_domain::invariant::monitor_count_matches;
-use vmtest_domain::scenario::{Observation, Scenario, Step, StepVerdict};
+use vmtest_domain::invariant::{glazewm_answers_ipc, monitor_count_matches};
+use vmtest_domain::scenario::{GlazewmIpc, Observation, Scenario, Step, StepVerdict};
 use vmtest_domain::settle::{SettleState, SettleTracker};
 
 /// Brings the guest back to its snapshot.
@@ -16,7 +16,10 @@ pub trait GuestExecutor {
     /// Returns once the guest daemon answers.
     fn wait_until_ready(&mut self) -> Result<(), String>;
     /// Deploys and starts the SUT in the interactive session.
-    fn start_sut(&mut self) -> Result<(), String>;
+    ///
+    /// Returns once glazewm has taken an IPC query, whether or not it answered within `ipc_limit`,
+    /// so that a glazewm stalled from start-up is judged rather than waited for.
+    fn start_sut(&mut self, ipc_limit: Duration) -> Result<(), String>;
 }
 
 /// Changes the guest's monitors.
@@ -28,7 +31,8 @@ pub trait DisplayController {
 
 /// Reads the guest's current state.
 pub trait Observer {
-    fn observe(&mut self) -> Result<Observation, String>;
+    /// Observes the guest, giving glazewm `ipc_limit`, measured in the guest, to answer.
+    fn observe(&mut self, ipc_limit: Duration) -> Result<Observation, String>;
 }
 
 /// Elapsed time, injectable so that settling can be tested without waiting.
@@ -60,11 +64,11 @@ where
     guest.restore()?;
     guest.wait_until_ready()?;
     guest.set_virtual_monitor_count(scenario.virtual_monitors)?;
-    guest.start_sut()?;
-    let mut verdicts = vec![judge(settled_observation(guest, clock, settle)?)];
+    guest.start_sut(scenario.ipc_limit)?;
+    let mut verdicts = vec![settled_verdict(scenario, guest, clock, settle)?];
     for step in &scenario.steps {
         apply(step, guest)?;
-        verdicts.push(judge(settled_observation(guest, clock, settle)?));
+        verdicts.push(settled_verdict(scenario, guest, clock, settle)?);
     }
     Ok(verdicts)
 }
@@ -77,15 +81,24 @@ fn apply(step: &Step, guest: &mut impl DisplayController) -> Result<(), String> 
     }
 }
 
+fn settled_verdict(
+    scenario: &Scenario,
+    guest: &mut impl Observer,
+    clock: &mut dyn Clock,
+    settle: SettleSettings,
+) -> Result<StepVerdict, String> {
+    settled_observation(|| guest.observe(scenario.ipc_limit), clock, settle).map(judge)
+}
+
 /// Polls until nothing has changed for the settle window; `None` when the limit is reached first.
 fn settled_observation(
-    guest: &mut impl Observer,
+    mut observe: impl FnMut() -> Result<Observation, String>,
     clock: &mut dyn Clock,
     settle: SettleSettings,
 ) -> Result<Option<Observation>, String> {
     let start = clock.now();
     let mut tracker = SettleTracker::new(settle.window, settle.limit);
-    let mut last = guest.observe()?;
+    let mut last = observe()?;
     loop {
         match tracker.state(clock.now() - start) {
             SettleState::Settled { .. } => return Ok(Some(last)),
@@ -93,7 +106,7 @@ fn settled_observation(
             SettleState::Waiting => {}
         }
         clock.sleep(settle.poll);
-        let current = guest.observe()?;
+        let current = observe()?;
         if current != last {
             tracker.record_change(clock.now() - start);
             last = current;
@@ -101,11 +114,16 @@ fn settled_observation(
     }
 }
 
+/// Judges a settled observation; a glazewm that did not answer has no monitors to compare.
 fn judge(observation: Option<Observation>) -> StepVerdict {
     let Some(observation) = observation else {
         return StepVerdict::Unsettled;
     };
-    match monitor_count_matches(observation.os_displays, observation.glazewm_monitors) {
+    let checked = match observation.glazewm {
+        GlazewmIpc::Monitors(monitors) => monitor_count_matches(observation.os_displays, monitors),
+        GlazewmIpc::NoAnswer => glazewm_answers_ipc(&observation.glazewm),
+    };
+    match checked {
         Ok(()) => StepVerdict::Passed,
         Err(violation) => StepVerdict::Violated(vec![violation]),
     }
@@ -137,6 +155,7 @@ mod tests {
     struct FakeGuest {
         log: Vec<String>,
         observations: Vec<Observation>,
+        ipc_limits: Vec<Duration>,
     }
 
     impl FakeGuest {
@@ -144,6 +163,7 @@ mod tests {
             Self {
                 log: Vec::new(),
                 observations,
+                ipc_limits: Vec::new(),
             }
         }
     }
@@ -160,7 +180,8 @@ mod tests {
             self.log.push("wait_until_ready".into());
             Ok(())
         }
-        fn start_sut(&mut self) -> Result<(), String> {
+        fn start_sut(&mut self, ipc_limit: Duration) -> Result<(), String> {
+            self.ipc_limits.push(ipc_limit);
             self.log.push("start_sut".into());
             Ok(())
         }
@@ -182,7 +203,8 @@ mod tests {
     }
 
     impl Observer for FakeGuest {
-        fn observe(&mut self) -> Result<Observation, String> {
+        fn observe(&mut self, ipc_limit: Duration) -> Result<Observation, String> {
+            self.ipc_limits.push(ipc_limit);
             if self.observations.len() > 1 {
                 Ok(self.observations.remove(0))
             } else {
@@ -194,7 +216,14 @@ mod tests {
     fn observed(os_displays: usize, glazewm_monitors: usize) -> Observation {
         Observation {
             os_displays,
-            glazewm_monitors,
+            glazewm: GlazewmIpc::Monitors(glazewm_monitors),
+        }
+    }
+
+    fn unanswered(os_displays: usize) -> Observation {
+        Observation {
+            os_displays,
+            glazewm: GlazewmIpc::NoAnswer,
         }
     }
 
@@ -203,6 +232,7 @@ mod tests {
             name: "test".into(),
             virtual_monitors: 1,
             steps,
+            ipc_limit: Duration::from_secs(2),
         }
     }
 
@@ -280,5 +310,42 @@ mod tests {
         .unwrap();
 
         assert_eq!(verdicts, [StepVerdict::Passed, StepVerdict::Unsettled]);
+    }
+
+    #[test]
+    fn reports_a_glazewm_that_stops_answering_and_runs_the_remaining_steps() {
+        let mut observations = vec![observed(2, 2); 6];
+        observations.extend(vec![unanswered(4); 6]);
+        observations.push(observed(2, 2));
+        let mut guest = FakeGuest::observing(observations);
+
+        let verdicts = run(
+            &scenario(vec![
+                Step::SetVirtualMonitorCount(3),
+                Step::SetVirtualMonitorCount(1),
+            ]),
+            &mut guest,
+            &mut FakeClock(Duration::ZERO),
+            SETTLE,
+        )
+        .unwrap();
+
+        assert_eq!(verdicts[0], StepVerdict::Passed);
+        assert!(
+            matches!(&verdicts[1], StepVerdict::Violated(v) if v.len() == 1 && v[0].invariant == "glazewm_answers_ipc")
+        );
+        assert_eq!(verdicts[2], StepVerdict::Passed);
+    }
+
+    #[test]
+    fn gives_the_scenario_ipc_limit_to_every_query_of_glazewm() {
+        let mut guest = FakeGuest::observing(vec![observed(2, 2)]);
+        let mut scenario = scenario(vec![]);
+        scenario.ipc_limit = Duration::from_millis(1500);
+
+        run(&scenario, &mut guest, &mut FakeClock(Duration::ZERO), SETTLE).unwrap();
+
+        assert!(!guest.ipc_limits.is_empty());
+        assert!(guest.ipc_limits.iter().all(|limit| *limit == Duration::from_millis(1500)));
     }
 }

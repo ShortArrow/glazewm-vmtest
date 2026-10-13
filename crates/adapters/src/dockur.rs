@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use vmtest_domain::scenario::Observation;
+use vmtest_domain::scenario::{GlazewmIpc, Observation};
 use vmtest_guest_client::GuestDaemonClient;
 use vmtest_protocol::{GlazewmQuery, Request, Response};
 use vmtest_runner::{Clock, DisplayController, GuestExecutor, Hypervisor, Observer};
@@ -42,6 +42,9 @@ const VIRTUAL_DISPLAY: &str = "Get-PnpDevice -FriendlyName 'Virtual Display Driv
 
 /// How long one connect, read, or write to the guest daemon may take.
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The longest IPC limit whose timed-out answer still reaches the runner within `DAEMON_TIMEOUT`.
+const LONGEST_IPC_LIMIT: Duration = Duration::from_secs(4);
 
 impl DockurGuest {
     pub fn new(config: DockurConfig) -> Self {
@@ -123,12 +126,17 @@ impl DockurGuest {
         response
     }
 
-    fn glazewm_monitor_count(&mut self) -> Result<usize, String> {
-        let query = GlazewmQuery::Monitors;
-        match self.request(&Request::QueryGlazewm { query })? {
-            Response::Output { stdout, .. } => glazewm::monitor_count(&stdout),
-            other => Err(format!("unexpected answer to glazewm-cli: {other:?}")),
+    fn query_glazewm_monitors(&mut self, ipc_limit: Duration) -> Result<GlazewmIpc, String> {
+        if ipc_limit > LONGEST_IPC_LIMIT {
+            return Err(format!(
+                "an IPC limit of {ipc_limit:?} exceeds the {LONGEST_IPC_LIMIT:?} this adapter supports"
+            ));
         }
+        let request = Request::QueryGlazewm {
+            query: GlazewmQuery::Monitors,
+            limit_ms: ipc_limit.as_millis().try_into().unwrap_or(u64::MAX),
+        };
+        glazewm::monitors_answer(self.request(&request)?)
     }
 }
 
@@ -179,7 +187,7 @@ impl GuestExecutor for DockurGuest {
         Ok(())
     }
 
-    fn start_sut(&mut self) -> Result<(), String> {
+    fn start_sut(&mut self, ipc_limit: Duration) -> Result<(), String> {
         self.ssh("New-Item -ItemType Directory -Force C:\\vmtest\\glazewm | Out-Null")?;
         let build = &self.config.glazewm_build;
         let binaries = [
@@ -200,8 +208,8 @@ impl GuestExecutor for DockurGuest {
              Start-ScheduledTask -TaskName vmtest-sut-glazewm",
             self.config.user
         ))?;
-        poll(Duration::from_secs(60), "glazewm to answer", || {
-            self.glazewm_monitor_count().map(|_| ())
+        poll(Duration::from_secs(60), "glazewm to take a query", || {
+            self.query_glazewm_monitors(ipc_limit).map(|_| ())
         })
     }
 }
@@ -232,15 +240,15 @@ impl DisplayController for DockurGuest {
 }
 
 impl Observer for DockurGuest {
-    fn observe(&mut self) -> Result<Observation, String> {
+    fn observe(&mut self, ipc_limit: Duration) -> Result<Observation, String> {
         let os_displays = match self.request(&Request::Topology)? {
             Response::Topology { displays } => displays.len(),
             other => return Err(format!("unexpected answer to topology: {other:?}")),
         };
-        let glazewm_monitors = self.glazewm_monitor_count()?;
+        let glazewm = self.query_glazewm_monitors(ipc_limit)?;
         Ok(Observation {
             os_displays,
-            glazewm_monitors,
+            glazewm,
         })
     }
 }

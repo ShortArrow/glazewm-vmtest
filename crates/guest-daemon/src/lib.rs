@@ -6,6 +6,7 @@ pub mod win32;
 pub mod process;
 
 use std::io::{BufRead, Write};
+use std::time::Duration;
 
 use vmtest_protocol::{DisplayDto, Request, Response, decode_line, encode_line};
 
@@ -23,10 +24,18 @@ pub struct CommandOutput {
     pub stderr: String,
 }
 
+/// How a command run with a time limit ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CliOutcome {
+    Finished(CommandOutput),
+    /// It had not finished when the limit passed, and was terminated.
+    TimedOut,
+}
+
 /// Runs the SUT's `glazewm-cli`.
 pub trait GlazewmCli {
-    /// Runs `glazewm-cli` with `args` and waits for it, or says why it could not be started.
-    fn run(&self, args: &[String]) -> Result<CommandOutput, String>;
+    /// Runs `glazewm-cli` with `args` for at most `limit`, or says why it could not be started.
+    fn run(&self, args: &[String], limit: Duration) -> Result<CliOutcome, String>;
 }
 
 /// Everything the daemon reads from or does in the guest.
@@ -42,14 +51,18 @@ pub fn handle(request: Request, guest: &dyn Guest) -> Response {
             Ok(displays) => Response::Topology { displays },
             Err(message) => Response::Error { message },
         },
-        Request::QueryGlazewm { query } => match guest.run(&query.cli_args().map(String::from)) {
-            Ok(output) => Response::Output {
-                exit_code: output.exit_code,
-                stdout: output.stdout,
-                stderr: output.stderr,
-            },
-            Err(message) => Response::Error { message },
-        },
+        Request::QueryGlazewm { query, limit_ms } => {
+            let args = query.cli_args().map(String::from);
+            match guest.run(&args, Duration::from_millis(limit_ms)) {
+                Ok(CliOutcome::Finished(output)) => Response::Output {
+                    exit_code: output.exit_code,
+                    stdout: output.stdout,
+                    stderr: output.stderr,
+                },
+                Ok(CliOutcome::TimedOut) => Response::TimedOut { limit_ms },
+                Err(message) => Response::Error { message },
+            }
+        }
     }
 }
 
@@ -88,15 +101,26 @@ mod tests {
     }
 
     impl GlazewmCli for FixedTopology {
-        fn run(&self, _args: &[String]) -> Result<CommandOutput, String> {
+        fn run(&self, _args: &[String], _limit: Duration) -> Result<CliOutcome, String> {
             Err("no glazewm-cli in this fake".into())
         }
     }
 
     /// A guest whose `glazewm-cli` records its arguments and answers with a fixed result.
     struct FakeCli {
-        answer: Result<CommandOutput, String>,
+        answer: Result<CliOutcome, String>,
         received: std::cell::RefCell<Vec<String>>,
+        limit: std::cell::Cell<Duration>,
+    }
+
+    impl FakeCli {
+        fn answering(answer: Result<CliOutcome, String>) -> Self {
+            Self {
+                answer,
+                received: Default::default(),
+                limit: Default::default(),
+            }
+        }
     }
 
     impl TopologySource for FakeCli {
@@ -106,8 +130,9 @@ mod tests {
     }
 
     impl GlazewmCli for FakeCli {
-        fn run(&self, args: &[String]) -> Result<CommandOutput, String> {
+        fn run(&self, args: &[String], limit: Duration) -> Result<CliOutcome, String> {
             *self.received.borrow_mut() = args.to_vec();
+            self.limit.set(limit);
             self.answer.clone()
         }
     }
@@ -119,19 +144,18 @@ mod tests {
             stdout: "{}".into(),
             stderr: String::new(),
         };
-        let guest = FakeCli {
-            answer: Ok(output),
-            received: Default::default(),
-        };
+        let guest = FakeCli::answering(Ok(CliOutcome::Finished(output)));
 
         let response = handle(
             Request::QueryGlazewm {
                 query: GlazewmQuery::Monitors,
+                limit_ms: 2000,
             },
             &guest,
         );
 
         assert_eq!(*guest.received.borrow(), ["query", "monitors"]);
+        assert_eq!(guest.limit.get(), Duration::from_millis(2000));
         assert_eq!(
             response,
             Response::Output {
@@ -144,14 +168,12 @@ mod tests {
 
     #[test]
     fn answers_with_an_error_when_glazewm_cli_cannot_start() {
-        let guest = FakeCli {
-            answer: Err("glazewm-cli.exe not found".into()),
-            received: Default::default(),
-        };
+        let guest = FakeCli::answering(Err("glazewm-cli.exe not found".into()));
 
         let response = handle(
             Request::QueryGlazewm {
                 query: GlazewmQuery::Monitors,
+                limit_ms: 2000,
             },
             &guest,
         );
@@ -162,6 +184,21 @@ mod tests {
                 message: "glazewm-cli.exe not found".into()
             }
         );
+    }
+
+    #[test]
+    fn answers_timed_out_when_glazewm_cli_does_not_finish_within_the_limit() {
+        let guest = FakeCli::answering(Ok(CliOutcome::TimedOut));
+
+        let response = handle(
+            Request::QueryGlazewm {
+                query: GlazewmQuery::Monitors,
+                limit_ms: 1500,
+            },
+            &guest,
+        );
+
+        assert_eq!(response, Response::TimedOut { limit_ms: 1500 });
     }
 
     fn one_display() -> Vec<DisplayDto> {

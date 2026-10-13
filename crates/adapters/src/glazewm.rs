@@ -2,6 +2,20 @@
 //!
 //! The JSON is read without glazewm's own types, so that SUT commits with a different IPC schema can still be observed.
 
+use vmtest_domain::scenario::GlazewmIpc;
+use vmtest_protocol::Response;
+
+/// Reads the guest daemon's answer to a `query monitors` as what glazewm answered.
+///
+/// A daemon-side error says nothing about glazewm, so it is an error of the harness, not `NoAnswer`.
+pub fn monitors_answer(response: Response) -> Result<GlazewmIpc, String> {
+    match response {
+        Response::Output { stdout, .. } => monitor_count(&stdout).map(GlazewmIpc::Monitors),
+        Response::TimedOut { .. } => Ok(GlazewmIpc::NoAnswer),
+        other => Err(format!("unexpected answer to a glazewm query: {other:?}")),
+    }
+}
+
 /// Returns the number of monitors in the output of `glazewm-cli query monitors`.
 pub fn monitor_count(stdout: &str) -> Result<usize, String> {
     let answer: serde_json::Value = serde_json::from_str(stdout.trim())
@@ -39,6 +53,34 @@ pub fn config_without_startup_commands(sample: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_finished_monitors_query_is_the_number_of_monitors() {
+        let response = Response::Output {
+            exit_code: Some(0),
+            stdout: r#"{"data":{"monitors":[{"id":"a"}]},"error":null,"success":true}"#.into(),
+            stderr: String::new(),
+        };
+
+        assert_eq!(monitors_answer(response), Ok(GlazewmIpc::Monitors(1)));
+    }
+
+    #[test]
+    fn a_timed_out_monitors_query_is_no_answer() {
+        assert_eq!(
+            monitors_answer(Response::TimedOut { limit_ms: 2000 }),
+            Ok(GlazewmIpc::NoAnswer)
+        );
+    }
+
+    #[test]
+    fn a_daemon_error_is_not_an_answer_from_glazewm() {
+        let response = Response::Error {
+            message: "glazewm-cli.exe not found".into(),
+        };
+
+        assert!(monitors_answer(response).is_err());
+    }
 
     #[test]
     fn empties_only_the_startup_and_shutdown_commands() {

@@ -8,12 +8,13 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub enum Request {
     Ping,
     Topology,
-    /// Runs a read-only `glazewm-cli query` in the interactive session.
+    /// Runs a read-only `glazewm-cli query` in the interactive session, stopping it after `limit_ms`.
     ///
     /// Only queries are expressible: free-form arguments would let anyone reaching the port run
     /// `glazewm-cli command shell-exec` and so any program in the guest.
     QueryGlazewm {
         query: GlazewmQuery,
+        limit_ms: u64,
     },
 }
 
@@ -46,6 +47,10 @@ pub enum Response {
         exit_code: Option<i32>,
         stdout: String,
         stderr: String,
+    },
+    /// The command had not finished after `limit_ms`, measured in the guest, and was terminated.
+    TimedOut {
+        limit_ms: u64,
     },
     Error {
         message: String,
@@ -121,6 +126,29 @@ mod tests {
                 is_primary: false,
             }],
         };
+
+        let decoded: Response = decode_line(&encode_line(&response)).unwrap();
+
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn a_glazewm_query_carries_its_time_limit_in_milliseconds() {
+        let request = Request::QueryGlazewm {
+            query: GlazewmQuery::Monitors,
+            limit_ms: 2000,
+        };
+
+        assert_eq!(
+            encode_line(&request),
+            "{\"type\":\"query_glazewm\",\"query\":\"monitors\",\"limit_ms\":2000}
+"
+        );
+    }
+
+    #[test]
+    fn a_timed_out_query_survives_a_round_trip() {
+        let response = Response::TimedOut { limit_ms: 2000 };
 
         let decoded: Response = decode_line(&encode_line(&response)).unwrap();
 
