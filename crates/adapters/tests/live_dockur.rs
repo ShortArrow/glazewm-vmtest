@@ -1,7 +1,7 @@
 //! Runs a scenario against the dockur/windows guest in guests/dockur-windows.
 //!
-//! Needs `cargo build --release -p vmtest-guest-daemon`, glazewm built into target/sut/glazewm/release,
-//! and the guest image of docs/GUEST-IMAGE.md.
+//! Needs `cargo build --release -p vmtest-guest-daemon`, glazewm built into target/sut/glazewm/release
+//! (or the directory named by `VMTEST_GLAZEWM_BUILD`), and the guest image of docs/GUEST-IMAGE.md.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -43,7 +43,9 @@ fn config(name: &str, glazewm_config: &str) -> DockurConfig {
         user: "fixture".into(),
         daemon_address: "127.0.0.1:7041".into(),
         daemon_executable: repository.join("target/release/vmtest-guest-daemon.exe"),
-        glazewm_build: repository.join("target/sut/glazewm/release"),
+        glazewm_build: std::env::var_os("VMTEST_GLAZEWM_BUILD")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| repository.join("target/sut/glazewm/release")),
         glazewm_config,
         start_glazewm_script: guest.join("scripts/start-glazewm.ps1"),
     }

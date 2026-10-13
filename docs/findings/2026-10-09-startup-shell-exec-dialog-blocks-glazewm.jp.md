@@ -1,7 +1,7 @@
 # 発見: 起動時の`shell-exec`が失敗すると、ダイアログを2つ閉じるまでglazewmが止まる
 
 - 日付: 2026-10-09
-- 状態: 候補。upstreamには報告していない
+- 状態: ../glazewmのブランチ`fix/failed-command-blocks-wm`で修正済み（`8c63768a`、`b801904d`）。upstreamには報告していない。upstreamのissue glzr-io/glazewm#705は、2つ目のダイアログを停止ではなく警告として扱っている
 - SUT: glazewm `5709ad0a`。ビルド方法はdocs/spikes/2026-10-09-first-glazewm-run.jp.mdのとおり
 - ゲスト: docs/GUEST-IMAGE.jp.mdのスナップショット`daemon-task`。zebarは入っていない
 
@@ -22,14 +22,16 @@
 
 ## ソースから分かる仕組み
 
-packages/wm-platform/src/dispatcher.rsの`shell_execute_ex`は、`ShellExecuteExW`を`fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC`で呼び、`SEE_MASK_FLAG_NO_UI`を付けていない。そのため、プログラムが見つからないと、シェルが呼び出し元のスレッドでモーダルダイアログを出す。2つ目のダイアログは、その結果のエラーをglazewm自身が報告したもの。コマンドを実行したスレッドはIPCを処理するスレッドでもあり、両方のダイアログがIPCを止めたことと整合する。デバッガーでは確かめていない。
+packages/wm-platform/src/dispatcher.rsの`shell_execute_ex`は、`ShellExecuteExW`を`fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC`で呼び、`SEE_MASK_FLAG_NO_UI`を付けていない。そのため、プログラムが見つからないと、シェルが呼び出し元のスレッドでモーダルダイアログを出す。2つ目のダイアログは、その結果のエラーをglazewm自身が報告したもの。packages/wm/src/main.rsの`start_wm`は、非致命的なエラーをすべて`show_error_dialog`で表示する。これは`MB_SYSTEMMODAL`付きの`MessageBoxW`で、閉じられるまで戻らず、イベントループを動かすスレッドの上で呼ばれる。このループはIPCのメッセージとウィンドウのイベントも受け取るので、2つ目のダイアログは両方を止める。`shell-exec`に限らず、どのコマンドが失敗しても同じになる。
+
+crates/adapters/tests/live_dockur.rsのシナリオ`glazewm_answers_ipc_after_a_startup_command_fails`は、`5709ad0a`では`glazewm_answers_ipc`の違反を報告し、修正ブランチでは通る。修正ブランチは`SEE_MASK_FLAG_NO_UI`を付け、非致命的なエラーのダイアログを別のスレッドで表示する。
 
 ## 利用者への影響
 
-アンインストール済みのプログラムを起動する設定を使っている利用者は、2つのダイアログを見つけて閉じるまで、IPCに応答しない（同じスレッドがウィンドウのイベントも処理しているなら、ウィンドウも管理しない）ウィンドウマネージャーを使うことになる。
+インストールされていないプログラムを起動する設定を使っている利用者は、2つのダイアログを見つけて閉じるまで、IPCにもウィンドウのイベントにも応じないウィンドウマネージャーを使うことになる。glazewmはステータスバーの選択を利用者に任せており、サンプル設定はzebarを起動する。そのため、zebar以外のバーを使う人やバーを使わない人で、サンプルの起動コマンドを残している人はすべて該当する。
 
 ## 未確認のこと
 
-- ダイアログが開いているあいだ、IPCだけでなくウィンドウ管理も止まるか。
+- ダイアログが開いているあいだウィンドウ管理も止まることは、ソースから読み取っただけで、観測していない。
 - キーバインドからの`shell-exec`でも同じように止まるか。
 - upstreamがこのダイアログを意図しているか。
