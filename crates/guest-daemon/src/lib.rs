@@ -8,7 +8,7 @@ pub mod process;
 use std::io::{BufRead, Write};
 use std::time::Duration;
 
-use vmtest_protocol::{DisplayDto, Request, Response, decode_line, encode_line};
+use vmtest_protocol::{DisplayDto, Request, Response, SutProgram, decode_line, encode_line};
 
 /// Reads the displays the guest OS currently reports.
 pub trait TopologySource {
@@ -38,10 +38,16 @@ pub trait GlazewmCli {
     fn run(&self, args: &[String], limit: Duration) -> Result<CliOutcome, String>;
 }
 
-/// Everything the daemon reads from or does in the guest.
-pub trait Guest: TopologySource + GlazewmCli {}
+/// Finds the SUT programs the harness deployed among the guest's processes.
+pub trait SutProcesses {
+    /// Says whether `program`, as deployed by the harness, has a running process, or why that cannot be known.
+    fn is_running(&self, program: SutProgram) -> Result<bool, String>;
+}
 
-impl<T: TopologySource + GlazewmCli> Guest for T {}
+/// Everything the daemon reads from or does in the guest.
+pub trait Guest: TopologySource + GlazewmCli + SutProcesses {}
+
+impl<T: TopologySource + GlazewmCli + SutProcesses> Guest for T {}
 
 /// Answers one request.
 pub fn handle(request: Request, guest: &dyn Guest) -> Response {
@@ -63,6 +69,10 @@ pub fn handle(request: Request, guest: &dyn Guest) -> Response {
                 Err(message) => Response::Error { message },
             }
         }
+        Request::SutRunning { program } => match guest.is_running(program) {
+            Ok(running) => Response::Running { running },
+            Err(message) => Response::Error { message },
+        },
     }
 }
 
@@ -90,13 +100,67 @@ pub fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmtest_protocol::{GlazewmQuery, RectDto};
+    use vmtest_protocol::{GlazewmQuery, RectDto, SutProgram};
+
+    /// A guest in which glazewm's process is running or not, and topology and `glazewm-cli` are unused.
+    struct FixedProcesses(Result<bool, String>);
+
+    impl TopologySource for FixedProcesses {
+        fn displays(&self) -> Result<Vec<DisplayDto>, String> {
+            Ok(vec![])
+        }
+    }
+
+    impl GlazewmCli for FixedProcesses {
+        fn run(&self, _args: &[String], _limit: Duration) -> Result<CliOutcome, String> {
+            Err("no glazewm-cli in this fake".into())
+        }
+    }
+
+    impl SutProcesses for FixedProcesses {
+        fn is_running(&self, program: SutProgram) -> Result<bool, String> {
+            assert_eq!(program, SutProgram::Glazewm);
+            self.0.clone()
+        }
+    }
+
+    #[test]
+    fn answers_whether_the_sut_program_is_running() {
+        let request = Request::SutRunning {
+            program: SutProgram::Glazewm,
+        };
+
+        assert_eq!(
+            handle(request, &FixedProcesses(Ok(false))),
+            Response::Running { running: false }
+        );
+    }
+
+    #[test]
+    fn answers_with_an_error_when_processes_cannot_be_listed() {
+        let request = Request::SutRunning {
+            program: SutProgram::Glazewm,
+        };
+
+        assert_eq!(
+            handle(request, &FixedProcesses(Err("snapshot failed".into()))),
+            Response::Error {
+                message: "snapshot failed".into()
+            }
+        );
+    }
 
     struct FixedTopology(Result<Vec<DisplayDto>, String>);
 
     impl TopologySource for FixedTopology {
         fn displays(&self) -> Result<Vec<DisplayDto>, String> {
             self.0.clone()
+        }
+    }
+
+    impl SutProcesses for FixedTopology {
+        fn is_running(&self, _program: SutProgram) -> Result<bool, String> {
+            Err("no processes in this fake".into())
         }
     }
 
@@ -126,6 +190,12 @@ mod tests {
     impl TopologySource for FakeCli {
         fn displays(&self) -> Result<Vec<DisplayDto>, String> {
             Ok(vec![])
+        }
+    }
+
+    impl SutProcesses for FakeCli {
+        fn is_running(&self, _program: SutProgram) -> Result<bool, String> {
+            Err("no processes in this fake".into())
         }
     }
 

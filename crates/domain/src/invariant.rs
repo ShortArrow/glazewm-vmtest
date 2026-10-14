@@ -25,10 +25,24 @@ pub fn monitor_count_matches(os_displays: usize, glazewm_monitors: usize) -> Res
     })
 }
 
+/// Checks that a glazewm process was running when the guest was observed.
+pub fn glazewm_is_running(answer: &GlazewmIpc) -> Result<(), Violation> {
+    match answer {
+        GlazewmIpc::NotRunning => Err(Violation {
+            invariant: "glazewm_is_running",
+            expected: "a running glazewm process".into(),
+            observed: "no glazewm process".into(),
+        }),
+        _ => Ok(()),
+    }
+}
+
 /// Checks that glazewm answered the IPC query within the scenario's time limit.
+///
+/// A glazewm that is not running was not asked, so `glazewm_is_running` judges it instead.
 pub fn glazewm_answers_ipc(answer: &GlazewmIpc) -> Result<(), Violation> {
     match answer {
-        GlazewmIpc::Answered(_) => Ok(()),
+        GlazewmIpc::Answered(_) | GlazewmIpc::NotRunning => Ok(()),
         GlazewmIpc::NoAnswer => Err(Violation {
             invariant: "glazewm_answers_ipc",
             expected: "an answer within the IPC time limit".into(),
@@ -40,6 +54,23 @@ pub fn glazewm_answers_ipc(answer: &GlazewmIpc) -> Result<(), Violation> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn holds_while_glazewm_is_running() {
+        assert_eq!(glazewm_is_running(&GlazewmIpc::NoAnswer), Ok(()));
+    }
+
+    #[test]
+    fn is_violated_when_glazewm_is_not_running() {
+        assert_eq!(
+            glazewm_is_running(&GlazewmIpc::NotRunning),
+            Err(Violation {
+                invariant: "glazewm_is_running",
+                expected: "a running glazewm process".into(),
+                observed: "no glazewm process".into(),
+            })
+        );
+    }
 
     #[test]
     fn holds_when_glazewm_answers_ipc() {

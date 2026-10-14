@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use vmtest_domain::scenario::{GlazewmIpc, Observation};
 use vmtest_domain::topology::Rect;
 use vmtest_guest_client::GuestDaemonClient;
-use vmtest_protocol::{GlazewmQuery, Request, Response};
+use vmtest_protocol::{GlazewmQuery, Request, Response, SutProgram};
 use vmtest_runner::{Clock, DisplayController, GuestExecutor, Hypervisor, Observer};
 
 use crate::glazewm;
@@ -139,6 +139,26 @@ impl DockurGuest {
         };
         glazewm::monitors_answer(self.request(&request)?)
     }
+
+    fn glazewm_is_running(&mut self) -> Result<bool, String> {
+        let request = Request::SutRunning {
+            program: SutProgram::Glazewm,
+        };
+        match self.request(&request)? {
+            Response::Running { running } => Ok(running),
+            other => Err(format!("unexpected answer to sut_running: {other:?}")),
+        }
+    }
+
+    /// Asks glazewm, then checks that it is still running, so that a glazewm that exits during the query
+    /// is observed as not running rather than as a failed query.
+    fn observe_glazewm(&mut self, ipc_limit: Duration) -> Result<GlazewmIpc, String> {
+        let answer = self.query_glazewm_monitors(ipc_limit);
+        if !self.glazewm_is_running()? {
+            return Ok(GlazewmIpc::NotRunning);
+        }
+        answer
+    }
 }
 
 impl Hypervisor for DockurGuest {
@@ -254,7 +274,7 @@ impl Observer for DockurGuest {
                 .collect(),
             other => return Err(format!("unexpected answer to topology: {other:?}")),
         };
-        let glazewm = self.query_glazewm_monitors(ipc_limit)?;
+        let glazewm = self.observe_glazewm(ipc_limit)?;
         Ok(Observation::new(os_displays, glazewm))
     }
 }

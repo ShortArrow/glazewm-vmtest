@@ -1,6 +1,6 @@
 //! Entry point of the guest daemon: `vmtest-guest-daemon [listen-address]`, default `0.0.0.0:7041`.
 //!
-//! The SUT's client is expected at `glazewm\glazewm-cli.exe` beside the daemon's executable.
+//! The SUT is expected at `glazewm\glazewm.exe` and its client at `glazewm\glazewm-cli.exe` beside the daemon's executable.
 //! Built without a console, so that no window of its own appears on the desktop under test;
 //! it logs to `guest-daemon.log` beside its executable.
 
@@ -13,11 +13,20 @@ fn main() -> std::io::Result<()> {
     use std::sync::Arc;
     use vmtest_guest_daemon::process::ProcessGlazewmCli;
     use vmtest_guest_daemon::win32::{self, Win32Topology};
-    use vmtest_guest_daemon::{CliOutcome, GlazewmCli, TopologySource, serve};
-    use vmtest_protocol::DisplayDto;
+    use vmtest_guest_daemon::{CliOutcome, GlazewmCli, SutProcesses, TopologySource, serve};
+    use vmtest_protocol::{DisplayDto, SutProgram};
 
     struct LiveGuest {
         cli: ProcessGlazewmCli,
+        glazewm: std::path::PathBuf,
+    }
+
+    impl SutProcesses for LiveGuest {
+        fn is_running(&self, program: SutProgram) -> Result<bool, String> {
+            match program {
+                SutProgram::Glazewm => win32::image_is_running(&self.glazewm),
+            }
+        }
     }
 
     impl TopologySource for LiveGuest {
@@ -53,9 +62,12 @@ fn main() -> std::io::Result<()> {
     if let Err(error) = win32::make_dpi_aware() {
         log(error);
     }
-    let executable = directory.join("glazewm").join("glazewm-cli.exe");
+    let sut = directory.join("glazewm");
     let guest = Arc::new(LiveGuest {
-        cli: ProcessGlazewmCli { executable },
+        cli: ProcessGlazewmCli {
+            executable: sut.join("glazewm-cli.exe"),
+        },
+        glazewm: sut.join("glazewm.exe"),
     });
     let listener = TcpListener::bind(&address)?;
     log(format!("listening on {address}"));

@@ -148,3 +148,71 @@ fn glazewm_answers_ipc_after_a_startup_command_fails() {
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed]);
 }
+
+#[test]
+#[ignore = "needs the dockur/windows guest and prebuilt binaries"]
+fn reports_a_glazewm_that_exits_as_not_running() {
+    let scenario = Scenario {
+        name: "glazewm exits when a third monitor appears".into(),
+        virtual_monitors: 1,
+        steps: vec![Step::SetVirtualMonitorCount(2)],
+        ipc_limit: DEFAULT_IPC_LIMIT,
+    };
+    let kill_glazewm_at_three_monitors = encoded_powershell(
+        "Add-Type -Name M -Namespace W -MemberDefinition '[DllImport(\"user32.dll\")] public static extern int GetSystemMetrics(int i);';          while ([W.M]::GetSystemMetrics(80) -lt 3) { Start-Sleep -Milliseconds 200 };          Stop-Process -Name glazewm -Force",
+    );
+    let glazewm_config = quiet_glazewm_config().replacen(
+        "startup_commands: []",
+        &format!(
+            "startup_commands: ['shell-exec --hide-window powershell -NoProfile -EncodedCommand {kill_glazewm_at_three_monitors}']"
+        ),
+        1,
+    );
+    let guest = config(
+        "glazewm-config-exits-at-three-monitors.yaml",
+        &glazewm_config,
+    );
+
+    let outcomes = run(
+        &scenario,
+        &mut DockurGuest::new(guest),
+        &mut SystemClock::start(),
+        SETTLE,
+    )
+    .unwrap();
+
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    assert_eq!(verdicts[0], StepVerdict::Passed);
+    assert!(
+        matches!(&verdicts[1], StepVerdict::Violated(v) if v.len() == 1 && v[0].invariant == "glazewm_is_running"),
+        "{verdicts:?}"
+    );
+}
+
+/// Encodes `script` for `powershell -EncodedCommand`: Base64 of its UTF-16LE bytes.
+///
+/// glazewm's `shell-exec` splits its command on whitespace and drops quotes, which an encoded script has none of.
+fn encoded_powershell(script: &str) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let mut encoded = String::new();
+    for chunk in bytes.chunks(3) {
+        let group = chunk.iter().enumerate().fold(0u32, |group, (i, &byte)| {
+            group | u32::from(byte) << (16 - 8 * i)
+        });
+        for i in 0..4 {
+            if i <= chunk.len() {
+                encoded.push(ALPHABET[(group >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                encoded.push('=');
+            }
+        }
+    }
+    encoded
+}
+
+#[test]
+fn encodes_a_powershell_script_as_base64_of_utf16le() {
+    assert_eq!(encoded_powershell("dir"), "ZABpAHIA");
+    assert_eq!(encoded_powershell("ab"), "YQBiAA==");
+}

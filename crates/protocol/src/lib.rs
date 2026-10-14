@@ -16,6 +16,17 @@ pub enum Request {
         query: GlazewmQuery,
         limit_ms: u64,
     },
+    /// Asks whether the SUT program the harness deployed is running in the guest.
+    SutRunning {
+        program: SutProgram,
+    },
+}
+
+/// The SUT programs the harness deploys into the guest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SutProgram {
+    Glazewm,
 }
 
 /// The `glazewm-cli query` subjects the runner reads.
@@ -51,6 +62,9 @@ pub enum Response {
     /// The command had not finished after `limit_ms`, measured in the guest, and was terminated.
     TimedOut {
         limit_ms: u64,
+    },
+    Running {
+        running: bool,
     },
     Error {
         message: String,
@@ -149,6 +163,28 @@ mod tests {
     #[test]
     fn a_timed_out_query_survives_a_round_trip() {
         let response = Response::TimedOut { limit_ms: 2000 };
+
+        let decoded: Response = decode_line(&encode_line(&response)).unwrap();
+
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn asks_whether_a_sut_program_is_running_by_name_only() {
+        let request = Request::SutRunning {
+            program: SutProgram::Glazewm,
+        };
+
+        assert_eq!(
+            encode_line(&request),
+            "{\"type\":\"sut_running\",\"program\":\"glazewm\"}
+"
+        );
+    }
+
+    #[test]
+    fn a_running_answer_survives_a_round_trip() {
+        let response = Response::Running { running: false };
 
         let decoded: Response = decode_line(&encode_line(&response)).unwrap();
 

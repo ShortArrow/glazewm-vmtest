@@ -57,6 +57,7 @@ struct ObservationFile {
 enum GlazewmFile {
     Answered { monitors: Vec<MonitorFile> },
     NoAnswer,
+    NotRunning,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -100,6 +101,7 @@ impl From<&Observation> for ObservationFile {
                     monitors: monitors.iter().map(MonitorFile::from).collect(),
                 },
                 GlazewmIpc::NoAnswer => GlazewmFile::NoAnswer,
+                GlazewmIpc::NotRunning => GlazewmFile::NotRunning,
             },
         }
     }
@@ -112,6 +114,7 @@ impl From<ObservationFile> for Observation {
                 GlazewmIpc::Answered(monitors.into_iter().map(MonitorLayout::from).collect())
             }
             GlazewmFile::NoAnswer => GlazewmIpc::NoAnswer,
+            GlazewmFile::NotRunning => GlazewmIpc::NotRunning,
         };
         Observation::new(
             file.os_displays.into_iter().map(Rect::from).collect(),
@@ -231,6 +234,7 @@ mod tests {
                 Some(answered()),
                 None,
                 Some(Observation::new(vec![], GlazewmIpc::NoAnswer)),
+                Some(Observation::new(vec![RECT], GlazewmIpc::NotRunning)),
             ],
         };
 

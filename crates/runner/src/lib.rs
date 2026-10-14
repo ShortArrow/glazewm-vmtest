@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use vmtest_domain::invariant::{glazewm_answers_ipc, monitor_count_matches};
+use vmtest_domain::invariant::{glazewm_answers_ipc, glazewm_is_running, monitor_count_matches};
 use vmtest_domain::scenario::{GlazewmIpc, Observation, Scenario, Step, StepOutcome, StepVerdict};
 use vmtest_domain::settle::{SettleState, SettleTracker};
 
@@ -119,7 +119,7 @@ fn settled_observation(
     }
 }
 
-/// Judges a settled observation; a glazewm that did not answer has no monitors to compare.
+/// Judges a settled observation; a glazewm that is not running or did not answer has no monitors to compare.
 fn judge(observation: Option<&Observation>) -> StepVerdict {
     let Some(observation) = observation else {
         return StepVerdict::Unsettled;
@@ -129,6 +129,7 @@ fn judge(observation: Option<&Observation>) -> StepVerdict {
             monitor_count_matches(observation.os_displays().len(), monitors.len())
         }
         GlazewmIpc::NoAnswer => glazewm_answers_ipc(observation.glazewm()),
+        GlazewmIpc::NotRunning => glazewm_is_running(observation.glazewm()),
     };
     match checked {
         Ok(()) => StepVerdict::Passed,
@@ -249,6 +250,10 @@ mod tests {
 
     fn unanswered(os_displays: usize) -> Observation {
         Observation::new(rects(os_displays), GlazewmIpc::NoAnswer)
+    }
+
+    fn not_running(os_displays: usize) -> Observation {
+        Observation::new(rects(os_displays), GlazewmIpc::NotRunning)
     }
 
     fn verdicts(outcomes: Vec<StepOutcome>) -> Vec<StepVerdict> {
@@ -374,6 +379,31 @@ mod tests {
             matches!(&verdicts[1], StepVerdict::Violated(v) if v.len() == 1 && v[0].invariant == "glazewm_answers_ipc")
         );
         assert_eq!(verdicts[2], StepVerdict::Passed);
+    }
+
+    #[test]
+    fn reports_a_glazewm_that_exits_as_not_running_alone_and_runs_the_remaining_steps() {
+        let mut observations = vec![observed(2, 2); 6];
+        observations.extend(vec![not_running(4); 6]);
+        let mut guest = FakeGuest::observing(observations);
+
+        let verdicts = verdicts(
+            run(
+                &scenario(vec![
+                    Step::SetVirtualMonitorCount(3),
+                    Step::SetVirtualMonitorCount(1),
+                ]),
+                &mut guest,
+                &mut FakeClock(Duration::ZERO),
+                SETTLE,
+            )
+            .unwrap(),
+        );
+
+        let not_running_alone = |verdict: &StepVerdict| matches!(verdict, StepVerdict::Violated(v) if v.len() == 1 && v[0].invariant == "glazewm_is_running");
+        assert_eq!(verdicts[0], StepVerdict::Passed);
+        assert!(not_running_alone(&verdicts[1]));
+        assert!(not_running_alone(&verdicts[2]));
     }
 
     #[test]

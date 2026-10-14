@@ -56,6 +56,8 @@ pub struct MonitorLayout {
 /// What glazewm answered to one IPC query.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GlazewmIpc {
+    /// No glazewm process was running to ask.
+    NotRunning,
     /// It answered `query monitors` with these monitors, ordered by position.
     Answered(Vec<MonitorLayout>),
     /// It accepted the query but did not answer within the scenario's IPC time limit.
