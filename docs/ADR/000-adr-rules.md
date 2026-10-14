@@ -19,7 +19,7 @@ The reason for a single change goes in its commit message in one or two sentence
 ## Files
 
 - `docs/ADR/NNN-kebab-case-title.md`, where `NNN` is a three-digit sequence number. Name the file after the question, not the answer (e.g. `NNN-scenario-format.md`).
-- To reverse a decision, rewrite the "Decision" and the reasons in the same file, and add a row to "History". Do not create a new one.
+- To reverse a decision, rewrite the "Decision" and the reasons in the same file, and add a row to "History". Do not create a new file, and do not append the new decision beside the old one: the old decision moves to "Options not taken", with the reason it is not taken now.
 - When the question itself no longer exists, delete the file. Numbers are never reused.
 - A Japanese translation sits beside it with the same name and a `.jp.md` extension, using the Japanese headings shown in the translation of this file. Neither version takes precedence: a difference between them is a defect, and whoever finds it brings both into line.
 
