@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 
 use vmtest_protocol::{AppCommand, AppReply, decode_line, encode_line};
 
+use crate::limits::Limits;
+
 /// Test windows to open in one request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Batch {
@@ -176,19 +178,22 @@ const CONNECT_LIMIT: Duration = Duration::from_secs(3);
 /// A test-window application started on the first request and kept for the rest of the daemon's life.
 pub struct LaunchedApp {
     executable: PathBuf,
+    limits: Limits,
     app: Mutex<Option<TestWindowApp<BufReader<TcpStream>, TcpStream>>>,
 }
 
 impl LaunchedApp {
-    pub fn new(executable: PathBuf) -> Self {
+    pub fn new(executable: PathBuf, limits: Limits) -> Self {
         Self {
             executable,
+            limits,
             app: Mutex::new(None),
         }
     }
 
     /// Opens the windows of `batch`, starting the application first if it is not running.
     pub fn open(&self, batch: &Batch) -> Result<Vec<u32>, String> {
+        self.limits.check(batch)?;
         let mut app = self.app.lock().map_err(|_| "a previous request panicked")?;
         let app = match app.as_mut() {
             Some(app) => app,
@@ -423,8 +428,21 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_batch_beyond_its_limits_before_starting_anything() {
+        let limits = Limits {
+            max_test_windows_per_request: 1,
+            ..Limits::default()
+        };
+        let host = LaunchedApp::new("vmtest-no-such-application.exe".into(), limits);
+
+        let error = host.open(&Batch::one_by_one(2)).unwrap_err();
+
+        assert!(error.contains("exceed"), "{error}");
+    }
+
+    #[test]
     fn reports_an_application_that_cannot_be_started() {
-        let host = LaunchedApp::new("vmtest-no-such-application.exe".into());
+        let host = LaunchedApp::new("vmtest-no-such-application.exe".into(), Limits::default());
 
         let error = host.open(&Batch::one_by_one(1)).unwrap_err();
 

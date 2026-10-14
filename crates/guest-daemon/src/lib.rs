@@ -3,6 +3,7 @@
 #[cfg(windows)]
 pub mod win32;
 
+pub mod limits;
 pub mod process;
 pub mod test_windows;
 

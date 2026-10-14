@@ -130,6 +130,8 @@ dependencies = [
 name = "vmtest-guest-daemon"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "vmtest-protocol",
  "windows",
 ]

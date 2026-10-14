@@ -1,7 +1,8 @@
 //! Entry point of the guest daemon: `vmtest-guest-daemon [listen-address]`, default `0.0.0.0:7041`.
 //!
 //! The SUT is expected at `glazewm\glazewm.exe` and its client at `glazewm\glazewm-cli.exe` beside the daemon's executable,
-//! and the Win32 test-window application at `vmtest-test-window-win32.exe` beside it.
+//! and the Win32 test-window application at `vmtest-test-window-win32.exe` beside it. Limits on requests
+//! are read from `guest-daemon.json` beside it if that file exists; the daemon does not start if it is invalid.
 //! Built without a console, so that no window of its own appears on the desktop under test;
 //! it logs to `guest-daemon.log` beside its executable.
 
@@ -12,6 +13,7 @@ fn main() -> std::io::Result<()> {
     use std::io::BufReader;
     use std::net::TcpListener;
     use std::sync::Arc;
+    use vmtest_guest_daemon::limits::Limits;
     use vmtest_guest_daemon::process::ProcessGlazewmCli;
     use vmtest_guest_daemon::test_windows::Batch;
     use vmtest_guest_daemon::test_windows::LaunchedApp;
@@ -103,13 +105,21 @@ fn main() -> std::io::Result<()> {
     if let Err(error) = win32::make_dpi_aware() {
         log(error);
     }
+    let limits = match std::fs::read_to_string(directory.join("guest-daemon.json")) {
+        Ok(text) => Limits::from_json(&text).map_err(|error| {
+            log(error.clone());
+            std::io::Error::other(error)
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Limits::default(),
+        Err(error) => return Err(error),
+    };
     let sut = directory.join("glazewm");
     let guest = Arc::new(LiveGuest {
         cli: ProcessGlazewmCli {
             executable: sut.join("glazewm-cli.exe"),
         },
         glazewm: sut.join("glazewm.exe"),
-        test_windows: LaunchedApp::new(directory.join("vmtest-test-window-win32.exe")),
+        test_windows: LaunchedApp::new(directory.join("vmtest-test-window-win32.exe"), limits),
     });
     let listener = TcpListener::bind(&address)?;
     log(format!("listening on {address}"));

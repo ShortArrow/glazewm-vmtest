@@ -51,6 +51,7 @@ fn config(name: &str, glazewm_config: &str) -> DockurConfig {
         daemon_address: "127.0.0.1:7041".into(),
         daemon_executable: repository.join("target/release/vmtest-guest-daemon.exe"),
         test_window_executable: repository.join("target/release/vmtest-test-window-win32.exe"),
+        daemon_limits: None,
         glazewm_build: std::env::var_os("VMTEST_GLAZEWM_BUILD")
             .map(PathBuf::from)
             .unwrap_or_else(|| repository.join("target/sut/glazewm/release")),

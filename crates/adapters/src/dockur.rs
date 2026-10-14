@@ -35,6 +35,8 @@ pub struct DockurConfig {
     pub daemon_executable: PathBuf,
     /// The Win32 test-window application, delivered beside the daemon.
     pub test_window_executable: PathBuf,
+    /// Limits on the daemon's requests, delivered as `guest-daemon.json`; `None` keeps the daemon's defaults.
+    pub daemon_limits: Option<PathBuf>,
     /// Directory holding glazewm.exe, glazewm-cli.exe and glazewm-watcher.exe.
     pub glazewm_build: PathBuf,
     pub glazewm_config: PathBuf,
@@ -258,6 +260,9 @@ impl GuestExecutor for DockurGuest {
             ],
             "C:/vmtest/",
         )?;
+        if let Some(limits) = self.config.daemon_limits.clone() {
+            self.scp(&[&limits], "C:/vmtest/guest-daemon.json")?;
+        }
         self.ssh("Start-ScheduledTask -TaskName vmtest-guest-daemon")?;
         let address = self.config.daemon_address.clone();
         let daemon = poll(
