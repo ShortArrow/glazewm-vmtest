@@ -150,6 +150,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmtest-test-window-win32"
+version = "0.1.0"
+dependencies = [
+ "vmtest-protocol",
+ "windows",
+]
+
+[[package]]
 name = "windows"
 version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

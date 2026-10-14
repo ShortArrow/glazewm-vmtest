@@ -5,11 +5,13 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use vmtest_domain::scenario::{GlazewmIpc, Observation};
+use vmtest_domain::scenario::{GlazewmIpc, Observation, TestWindow};
 use vmtest_domain::topology::Rect;
 use vmtest_guest_client::GuestDaemonClient;
-use vmtest_protocol::{GlazewmQuery, Request, Response, SutProgram};
-use vmtest_runner::{Clock, DisplayController, GuestExecutor, Hypervisor, Observer};
+use vmtest_protocol::{GlazewmQuery, RectDto, Request, Response, SutProgram, TestWindowDto};
+use vmtest_runner::{
+    Clock, DisplayController, GuestExecutor, Hypervisor, Observer, WorkloadController,
+};
 
 use crate::glazewm;
 
@@ -27,6 +29,8 @@ pub struct DockurConfig {
     pub user: String,
     pub daemon_address: String,
     pub daemon_executable: PathBuf,
+    /// The Win32 test-window application, delivered beside the daemon.
+    pub test_window_executable: PathBuf,
     /// Directory holding glazewm.exe, glazewm-cli.exe and glazewm-watcher.exe.
     pub glazewm_build: PathBuf,
     pub glazewm_config: PathBuf,
@@ -127,7 +131,13 @@ impl DockurGuest {
         response
     }
 
-    fn query_glazewm_monitors(&mut self, ipc_limit: Duration) -> Result<GlazewmIpc, String> {
+    /// Queries glazewm's monitors, telling the test windows among its windows apart by `test_windows`,
+    /// pairs of id and handle.
+    fn query_glazewm_monitors(
+        &mut self,
+        ipc_limit: Duration,
+        test_windows: &[(u32, i64)],
+    ) -> Result<GlazewmIpc, String> {
         if ipc_limit > LONGEST_IPC_LIMIT {
             return Err(format!(
                 "an IPC limit of {ipc_limit:?} exceeds the {LONGEST_IPC_LIMIT:?} this adapter supports"
@@ -137,7 +147,14 @@ impl DockurGuest {
             query: GlazewmQuery::Monitors,
             limit_ms: ipc_limit.as_millis().try_into().unwrap_or(u64::MAX),
         };
-        glazewm::monitors_answer(self.request(&request)?)
+        glazewm::monitors_answer(self.request(&request)?, test_windows)
+    }
+
+    fn test_windows(&mut self) -> Result<Vec<TestWindowDto>, String> {
+        match self.request(&Request::TestWindows)? {
+            Response::TestWindows { windows } => Ok(windows),
+            other => Err(format!("unexpected answer to test_windows: {other:?}")),
+        }
     }
 
     fn glazewm_is_running(&mut self) -> Result<bool, String> {
@@ -152,8 +169,12 @@ impl DockurGuest {
 
     /// Asks glazewm, then checks that it is still running, so that a glazewm that exits during the query
     /// is observed as not running rather than as a failed query.
-    fn observe_glazewm(&mut self, ipc_limit: Duration) -> Result<GlazewmIpc, String> {
-        let answer = self.query_glazewm_monitors(ipc_limit);
+    fn observe_glazewm(
+        &mut self,
+        ipc_limit: Duration,
+        test_windows: &[(u32, i64)],
+    ) -> Result<GlazewmIpc, String> {
+        let answer = self.query_glazewm_monitors(ipc_limit, test_windows);
         if !self.glazewm_is_running()? {
             return Ok(GlazewmIpc::NotRunning);
         }
@@ -188,7 +209,13 @@ impl GuestExecutor for DockurGuest {
         poll(Duration::from_secs(300), "SSH to answer", || {
             self.ssh("exit 0").map(|_| ())
         })?;
-        self.scp(&[&self.config.daemon_executable.clone()], "C:/vmtest/")?;
+        self.scp(
+            &[
+                &self.config.daemon_executable.clone(),
+                &self.config.test_window_executable.clone(),
+            ],
+            "C:/vmtest/",
+        )?;
         self.ssh("Start-ScheduledTask -TaskName vmtest-guest-daemon")?;
         let address = self.config.daemon_address.clone();
         let daemon = poll(
@@ -230,7 +257,7 @@ impl GuestExecutor for DockurGuest {
             self.config.user
         ))?;
         poll(Duration::from_secs(60), "glazewm to take a query", || {
-            self.query_glazewm_monitors(ipc_limit).map(|_| ())
+            self.query_glazewm_monitors(ipc_limit, &[]).map(|_| ())
         })
     }
 }
@@ -260,22 +287,40 @@ impl DisplayController for DockurGuest {
     }
 }
 
+impl WorkloadController for DockurGuest {
+    fn open_test_windows(&mut self, count: u32) -> Result<(), String> {
+        match self.request(&Request::OpenTestWindows { count })? {
+            Response::TestWindowsOpened { ids } if ids.len() == count as usize => Ok(()),
+            other => Err(format!(
+                "unexpected answer to opening {count} test windows: {other:?}"
+            )),
+        }
+    }
+}
+
 impl Observer for DockurGuest {
     fn observe(&mut self, ipc_limit: Duration) -> Result<Observation, String> {
         let os_displays = match self.request(&Request::Topology)? {
             Response::Topology { displays } => displays
                 .iter()
-                .map(|display| Rect {
-                    x: display.bounds.x,
-                    y: display.bounds.y,
-                    width: display.bounds.width,
-                    height: display.bounds.height,
-                })
+                .map(|display| rect(display.bounds))
                 .collect(),
             other => return Err(format!("unexpected answer to topology: {other:?}")),
         };
-        let glazewm = self.observe_glazewm(ipc_limit)?;
-        Ok(Observation::new(os_displays, glazewm))
+        let test_windows = self.test_windows()?;
+        let handles: Vec<_> = test_windows
+            .iter()
+            .map(|window| (window.id, window.handle))
+            .collect();
+        let glazewm = self.observe_glazewm(ipc_limit, &handles)?;
+        let test_windows = test_windows
+            .into_iter()
+            .map(|window| TestWindow {
+                id: window.id,
+                frame: window.frame.map(rect),
+            })
+            .collect();
+        Ok(Observation::new(os_displays, test_windows, glazewm))
     }
 }
 
@@ -295,6 +340,15 @@ impl Clock for SystemClock {
 
     fn sleep(&mut self, duration: Duration) {
         std::thread::sleep(duration);
+    }
+}
+
+fn rect(dto: RectDto) -> Rect {
+    Rect {
+        x: dto.x,
+        y: dto.y,
+        width: dto.width,
+        height: dto.height,
     }
 }
 

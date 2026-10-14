@@ -1,0 +1,701 @@
+{
+  "sut_commit": "5709ad0a",
+  "steps": [
+    {
+      "os_displays": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 800
+        },
+        {
+          "x": 1280,
+          "y": 0,
+          "width": 800,
+          "height": 600
+        }
+      ],
+      "test_windows": [],
+      "glazewm": {
+        "answer": "answered",
+        "monitors": [
+          {
+            "bounds": {
+              "x": 0,
+              "y": 0,
+              "width": 1280,
+              "height": 800
+            },
+            "working_area": {
+              "x": 0,
+              "y": 0,
+              "width": 1280,
+              "height": 752
+            },
+            "dpi": 96,
+            "has_focus": false,
+            "workspaces": [
+              {
+                "name": "1",
+                "is_displayed": true,
+                "has_focus": false,
+                "tiling_direction": "horizontal",
+                "windows": []
+              }
+            ]
+          },
+          {
+            "bounds": {
+              "x": 1280,
+              "y": 0,
+              "width": 800,
+              "height": 600
+            },
+            "working_area": {
+              "x": 1280,
+              "y": 0,
+              "width": 800,
+              "height": 552
+            },
+            "dpi": 96,
+            "has_focus": true,
+            "workspaces": [
+              {
+                "name": "2",
+                "is_displayed": true,
+                "has_focus": true,
+                "tiling_direction": "horizontal",
+                "windows": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "os_displays": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 800
+        },
+        {
+          "x": 1280,
+          "y": 0,
+          "width": 800,
+          "height": 600
+        }
+      ],
+      "test_windows": [
+        {
+          "id": 0,
+          "frame": {
+            "x": 1300,
+            "y": 60,
+            "width": 240,
+            "height": 472
+          }
+        },
+        {
+          "id": 1,
+          "frame": {
+            "x": 1560,
+            "y": 60,
+            "width": 240,
+            "height": 472
+          }
+        },
+        {
+          "id": 2,
+          "frame": {
+            "x": 1820,
+            "y": 60,
+            "width": 240,
+            "height": 472
+          }
+        }
+      ],
+      "glazewm": {
+        "answer": "answered",
+        "monitors": [
+          {
+            "bounds": {
+              "x": 0,
+              "y": 0,
+              "width": 1280,
+              "height": 800
+            },
+            "working_area": {
+              "x": 0,
+              "y": 0,
+              "width": 1280,
+              "height": 752
+            },
+            "dpi": 96,
+            "has_focus": false,
+            "workspaces": [
+              {
+                "name": "1",
+                "is_displayed": true,
+                "has_focus": false,
+                "tiling_direction": "horizontal",
+                "windows": []
+              }
+            ]
+          },
+          {
+            "bounds": {
+              "x": 1280,
+              "y": 0,
+              "width": 800,
+              "height": 600
+            },
+            "working_area": {
+              "x": 1280,
+              "y": 0,
+              "width": 800,
+              "height": 552
+            },
+            "dpi": 96,
+            "has_focus": true,
+            "workspaces": [
+              {
+                "name": "2",
+                "is_displayed": true,
+                "has_focus": true,
+                "tiling_direction": "horizontal",
+                "windows": [
+                  {
+                    "test_window": 0,
+                    "state": "tiling"
+                  },
+                  {
+                    "test_window": 1,
+                    "state": "tiling"
+                  },
+                  {
+                    "test_window": 2,
+                    "state": "tiling"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "os_displays": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 800
+        },
+        {
+          "x": 1280,
+          "y": 0,
+          "width": 800,
+          "height": 600
+        },
+        {
+          "x": 2080,
+          "y": 0,
+          "width": 800,
+          "height": 600
+        },
+        {
+          "x": 2880,
+          "y": 0,
+          "width": 800,
+          "height": 600
+        }
+      ],
+      "test_windows": [
+        {
+          "id": 0,
+          "frame": {
+            "x": 20,
+            "y": 60,
+            "width": 400,
+            "height": 672
+          }
+        },
+        {
+          "id": 1,
+          "frame": {
+            "x": 440,
+            "y": 60,
+            "width": 400,
+            "height": 672
+          }
+        },
+        {
+          "id": 2,
+          "frame": {
+            "x": 860,
+            "y": 60,
+            "width": 400,
+            "height": 672
+          }
+        }
+      ],
+      "glazewm": {
+        "answer": "answered",
+        "monitors": [
+          {
+            "bounds": {
+              "x": 0,
+              "y": 0,
+              "width": 1280,
+              "height": 800
+            },
+            "working_area": {
+              "x": 0,
+              "y": 0,
+              "width": 1280,
+              "height": 752
+            },
+            "dpi": 96,
+            "has_focus": true,
+            "workspaces": [
+              {
+                "name": "1",
+                "is_displayed": false,
+                "has_focus": false,
+                "tiling_direction": "horizontal",
+                "windows": []
+              },
+              {
+                "name": "2",
+                "is_displayed": true,
+                "has_focus": true,
+                "tiling_direction": "horizontal",
+                "windows": [
+                  {
+                    "test_window": 0,
+                    "state": "tiling"
+                  },
+                  {
+                    "test_window": 1,
+                    "state": "tiling"
+                  },
+                  {
+                    "test_window": 2,
+                    "state": "tiling"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "bounds": {
+              "x": 1280,
+              "y": 0,
+              "width": 800,
+              "height": 600
+            },
+            "working_area": {
+              "x": 1280,
+              "y": 0,
+              "width": 800,
+              "height": 552
+            },
+            "dpi": 96,
+            "has_focus": false,
+            "workspaces": [
+              {
+                "name": "3",
+                "is_displayed": true,
+                "has_focus": false,
+                "tiling_direction": "horizontal",
+                "windows": []
+              }
+            ]
+          },
+          {
+            "bounds": {
+              "x": 2080,
+              "y": 0,
+              "width": 800,
+              "height": 600
+            },
+            "working_area": {
+              "x": 2080,
+              "y": 0,
+              "width": 800,
+              "height": 552
+            },
+            "dpi": 96,
+            "has_focus": false,
+            "workspaces": [
+              {
+                "name": "4",
+                "is_displayed": true,
+                "has_focus": false,
+                "tiling_direction": "horizontal",
+                "windows": []
+              }
+            ]
+          },
+          {
+            "bounds": {
+              "x": 2880,
+              "y": 0,
+              "width": 800,
+              "height": 600
+            },
+            "working_area": {
+              "x": 2880,
+              "y": 0,
+              "width": 800,
+              "height": 552
+            },
+            "dpi": 96,
+            "has_focus": false,
+            "workspaces": [
+              {
+                "name": "5",
+                "is_displayed": true,
+                "has_focus": false,
+                "tiling_direction": "horizontal",
+                "windows": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "os_displays": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 800
+        },
+        {
+          "x": 1280,
+          "y": 0,
+          "width": 800,
+          "height": 600
+        }
+      ],
+      "test_windows": [
+        {
+          "id": 0,
+          "frame": {
+            "x": 20,
+            "y": 60,
+            "width": 400,
+            "height": 672
+          }
+        },
+        {
+          "id": 1,
+          "frame": {
+            "x": 440,
+            "y": 60,
+            "width": 400,
+            "height": 672
+          }
+        },
+        {
+          "id": 2,
+          "frame": {
+            "x": 860,
+            "y": 60,
+            "width": 400,
+            "height": 672
+          }
+        }
+      ],
+      "glazewm": {
+        "answer": "answered",
+        "monitors": [
+          {
+            "bounds": {
+              "x": 0,
+              "y": 0,
+              "width": 1280,
+              "height": 800
+            },
+            "working_area": {
+              "x": 0,
+              "y": 0,
+              "width": 1280,
+              "height": 752
+            },
+            "dpi": 96,
+            "has_focus": true,
+            "workspaces": [
+              {
+                "name": "1",
+                "is_displayed": false,
+                "has_focus": false,
+                "tiling_direction": "horizontal",
+                "windows": []
+              },
+              {
+                "name": "2",
+                "is_displayed": true,
+                "has_focus": true,
+                "tiling_direction": "horizontal",
+                "windows": [
+                  {
+                    "test_window": 0,
+                    "state": "tiling"
+                  },
+                  {
+                    "test_window": 1,
+                    "state": "tiling"
+                  },
+                  {
+                    "test_window": 2,
+                    "state": "tiling"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "bounds": {
+              "x": 1280,
+              "y": 0,
+              "width": 800,
+              "height": 600
+            },
+            "working_area": {
+              "x": 1280,
+              "y": 0,
+              "width": 800,
+              "height": 552
+            },
+            "dpi": 96,
+            "has_focus": false,
+            "workspaces": [
+              {
+                "name": "3",
+                "is_displayed": true,
+                "has_focus": false,
+                "tiling_direction": "horizontal",
+                "windows": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "os_displays": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 800
+        }
+      ],
+      "test_windows": [
+        {
+          "id": 0,
+          "frame": {
+            "x": 20,
+            "y": 60,
+            "width": 400,
+            "height": 672
+          }
+        },
+        {
+          "id": 1,
+          "frame": {
+            "x": 440,
+            "y": 60,
+            "width": 400,
+            "height": 672
+          }
+        },
+        {
+          "id": 2,
+          "frame": {
+            "x": 860,
+            "y": 60,
+            "width": 400,
+            "height": 672
+          }
+        }
+      ],
+      "glazewm": {
+        "answer": "answered",
+        "monitors": [
+          {
+            "bounds": {
+              "x": 0,
+              "y": 0,
+              "width": 1280,
+              "height": 800
+            },
+            "working_area": {
+              "x": 0,
+              "y": 0,
+              "width": 1280,
+              "height": 752
+            },
+            "dpi": 96,
+            "has_focus": true,
+            "workspaces": [
+              {
+                "name": "1",
+                "is_displayed": false,
+                "has_focus": false,
+                "tiling_direction": "horizontal",
+                "windows": []
+              },
+              {
+                "name": "2",
+                "is_displayed": true,
+                "has_focus": true,
+                "tiling_direction": "horizontal",
+                "windows": [
+                  {
+                    "test_window": 0,
+                    "state": "tiling"
+                  },
+                  {
+                    "test_window": 1,
+                    "state": "tiling"
+                  },
+                  {
+                    "test_window": 2,
+                    "state": "tiling"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "os_displays": [
+        {
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 800
+        },
+        {
+          "x": 1280,
+          "y": 0,
+          "width": 800,
+          "height": 600
+        }
+      ],
+      "test_windows": [
+        {
+          "id": 0,
+          "frame": {
+            "x": 20,
+            "y": 60,
+            "width": 400,
+            "height": 672
+          }
+        },
+        {
+          "id": 1,
+          "frame": {
+            "x": 440,
+            "y": 60,
+            "width": 400,
+            "height": 672
+          }
+        },
+        {
+          "id": 2,
+          "frame": {
+            "x": 860,
+            "y": 60,
+            "width": 400,
+            "height": 672
+          }
+        }
+      ],
+      "glazewm": {
+        "answer": "answered",
+        "monitors": [
+          {
+            "bounds": {
+              "x": 0,
+              "y": 0,
+              "width": 1280,
+              "height": 800
+            },
+            "working_area": {
+              "x": 0,
+              "y": 0,
+              "width": 1280,
+              "height": 752
+            },
+            "dpi": 96,
+            "has_focus": true,
+            "workspaces": [
+              {
+                "name": "1",
+                "is_displayed": false,
+                "has_focus": false,
+                "tiling_direction": "horizontal",
+                "windows": []
+              },
+              {
+                "name": "2",
+                "is_displayed": true,
+                "has_focus": true,
+                "tiling_direction": "horizontal",
+                "windows": [
+                  {
+                    "test_window": 0,
+                    "state": "tiling"
+                  },
+                  {
+                    "test_window": 1,
+                    "state": "tiling"
+                  },
+                  {
+                    "test_window": 2,
+                    "state": "tiling"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "bounds": {
+              "x": 1280,
+              "y": 0,
+              "width": 800,
+              "height": 600
+            },
+            "working_area": {
+              "x": 1280,
+              "y": 0,
+              "width": 800,
+              "height": 552
+            },
+            "dpi": 96,
+            "has_focus": false,
+            "workspaces": [
+              {
+                "name": "3",
+                "is_displayed": true,
+                "has_focus": false,
+                "tiling_direction": "horizontal",
+                "windows": []
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

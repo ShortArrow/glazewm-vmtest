@@ -68,7 +68,7 @@ mod tests {
                 height: 600,
             })
             .collect();
-        Some(Observation::new(rects, GlazewmIpc::NoAnswer))
+        Some(Observation::new(rects, vec![], GlazewmIpc::NoAnswer))
     }
 
     fn baseline(steps: Vec<Option<Observation>>) -> Baseline {

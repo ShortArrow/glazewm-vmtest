@@ -4,11 +4,14 @@
 pub mod win32;
 
 pub mod process;
+pub mod test_windows;
 
 use std::io::{BufRead, Write};
 use std::time::Duration;
 
-use vmtest_protocol::{DisplayDto, Request, Response, SutProgram, decode_line, encode_line};
+use vmtest_protocol::{
+    DisplayDto, Request, Response, SutProgram, TestWindowDto, decode_line, encode_line,
+};
 
 /// Reads the displays the guest OS currently reports.
 pub trait TopologySource {
@@ -44,10 +47,18 @@ pub trait SutProcesses {
     fn is_running(&self, program: SutProgram) -> Result<bool, String>;
 }
 
-/// Everything the daemon reads from or does in the guest.
-pub trait Guest: TopologySource + GlazewmCli + SutProcesses {}
+/// Opens test windows through a test-window application and reads where they are.
+pub trait TestWindowHost {
+    /// Opens `count` more test windows and returns their ids once each exists.
+    fn open(&self, count: u32) -> Result<Vec<u32>, String>;
+    /// Every test window opened so far, in the order of opening, with its frame as the OS reports it now.
+    fn windows(&self) -> Result<Vec<TestWindowDto>, String>;
+}
 
-impl<T: TopologySource + GlazewmCli + SutProcesses> Guest for T {}
+/// Everything the daemon reads from or does in the guest.
+pub trait Guest: TopologySource + GlazewmCli + SutProcesses + TestWindowHost {}
+
+impl<T: TopologySource + GlazewmCli + SutProcesses + TestWindowHost> Guest for T {}
 
 /// Answers one request.
 pub fn handle(request: Request, guest: &dyn Guest) -> Response {
@@ -71,6 +82,14 @@ pub fn handle(request: Request, guest: &dyn Guest) -> Response {
         }
         Request::SutRunning { program } => match guest.is_running(program) {
             Ok(running) => Response::Running { running },
+            Err(message) => Response::Error { message },
+        },
+        Request::OpenTestWindows { count } => match guest.open(count) {
+            Ok(ids) => Response::TestWindowsOpened { ids },
+            Err(message) => Response::Error { message },
+        },
+        Request::TestWindows => match guest.windows() {
+            Ok(windows) => Response::TestWindows { windows },
             Err(message) => Response::Error { message },
         },
     }
@@ -100,7 +119,89 @@ pub fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmtest_protocol::{GlazewmQuery, RectDto, SutProgram};
+    use vmtest_protocol::{GlazewmQuery, RectDto, SutProgram, TestWindowDto};
+
+    /// A guest whose test-window host answers from fixed results, and whose other parts are unused.
+    struct FixedWindows {
+        opened: Result<Vec<u32>, String>,
+        windows: Vec<TestWindowDto>,
+    }
+
+    impl TopologySource for FixedWindows {
+        fn displays(&self) -> Result<Vec<DisplayDto>, String> {
+            Ok(vec![])
+        }
+    }
+
+    impl GlazewmCli for FixedWindows {
+        fn run(&self, _args: &[String], _limit: Duration) -> Result<CliOutcome, String> {
+            Err("no glazewm-cli in this fake".into())
+        }
+    }
+
+    impl SutProcesses for FixedWindows {
+        fn is_running(&self, _program: SutProgram) -> Result<bool, String> {
+            Err("no processes in this fake".into())
+        }
+    }
+
+    impl TestWindowHost for FixedWindows {
+        fn open(&self, count: u32) -> Result<Vec<u32>, String> {
+            assert_eq!(count, 2);
+            self.opened.clone()
+        }
+        fn windows(&self) -> Result<Vec<TestWindowDto>, String> {
+            Ok(self.windows.clone())
+        }
+    }
+
+    #[test]
+    fn answers_with_the_ids_of_the_test_windows_it_opened() {
+        let guest = FixedWindows {
+            opened: Ok(vec![0, 1]),
+            windows: vec![],
+        };
+
+        assert_eq!(
+            handle(Request::OpenTestWindows { count: 2 }, &guest),
+            Response::TestWindowsOpened { ids: vec![0, 1] }
+        );
+    }
+
+    #[test]
+    fn answers_with_an_error_when_test_windows_cannot_be_opened() {
+        let guest = FixedWindows {
+            opened: Err("the test-window application closed its connection".into()),
+            windows: vec![],
+        };
+
+        assert_eq!(
+            handle(Request::OpenTestWindows { count: 2 }, &guest),
+            Response::Error {
+                message: "the test-window application closed its connection".into()
+            }
+        );
+    }
+
+    #[test]
+    fn answers_with_every_test_window_and_its_frame() {
+        let window = TestWindowDto {
+            id: 0,
+            handle: 10,
+            frame: None,
+        };
+        let guest = FixedWindows {
+            opened: Ok(vec![]),
+            windows: vec![window.clone()],
+        };
+
+        assert_eq!(
+            handle(Request::TestWindows, &guest),
+            Response::TestWindows {
+                windows: vec![window]
+            }
+        );
+    }
 
     /// A guest in which glazewm's process is running or not, and topology and `glazewm-cli` are unused.
     struct FixedProcesses(Result<bool, String>);
@@ -114,6 +215,15 @@ mod tests {
     impl GlazewmCli for FixedProcesses {
         fn run(&self, _args: &[String], _limit: Duration) -> Result<CliOutcome, String> {
             Err("no glazewm-cli in this fake".into())
+        }
+    }
+
+    impl TestWindowHost for FixedProcesses {
+        fn open(&self, _count: u32) -> Result<Vec<u32>, String> {
+            Err("no test windows in this fake".into())
+        }
+        fn windows(&self) -> Result<Vec<TestWindowDto>, String> {
+            Err("no test windows in this fake".into())
         }
     }
 
@@ -164,6 +274,15 @@ mod tests {
         }
     }
 
+    impl TestWindowHost for FixedTopology {
+        fn open(&self, _count: u32) -> Result<Vec<u32>, String> {
+            Err("no test windows in this fake".into())
+        }
+        fn windows(&self) -> Result<Vec<TestWindowDto>, String> {
+            Err("no test windows in this fake".into())
+        }
+    }
+
     impl GlazewmCli for FixedTopology {
         fn run(&self, _args: &[String], _limit: Duration) -> Result<CliOutcome, String> {
             Err("no glazewm-cli in this fake".into())
@@ -196,6 +315,15 @@ mod tests {
     impl SutProcesses for FakeCli {
         fn is_running(&self, _program: SutProgram) -> Result<bool, String> {
             Err("no processes in this fake".into())
+        }
+    }
+
+    impl TestWindowHost for FakeCli {
+        fn open(&self, _count: u32) -> Result<Vec<u32>, String> {
+            Err("no test windows in this fake".into())
+        }
+        fn windows(&self) -> Result<Vec<TestWindowDto>, String> {
+            Err("no test windows in this fake".into())
         }
     }
 

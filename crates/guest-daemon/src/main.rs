@@ -1,6 +1,7 @@
 //! Entry point of the guest daemon: `vmtest-guest-daemon [listen-address]`, default `0.0.0.0:7041`.
 //!
-//! The SUT is expected at `glazewm\glazewm.exe` and its client at `glazewm\glazewm-cli.exe` beside the daemon's executable.
+//! The SUT is expected at `glazewm\glazewm.exe` and its client at `glazewm\glazewm-cli.exe` beside the daemon's executable,
+//! and the Win32 test-window application at `vmtest-test-window-win32.exe` beside it.
 //! Built without a console, so that no window of its own appears on the desktop under test;
 //! it logs to `guest-daemon.log` beside its executable.
 
@@ -12,13 +13,36 @@ fn main() -> std::io::Result<()> {
     use std::net::TcpListener;
     use std::sync::Arc;
     use vmtest_guest_daemon::process::ProcessGlazewmCli;
+    use vmtest_guest_daemon::test_windows::LaunchedApp;
     use vmtest_guest_daemon::win32::{self, Win32Topology};
-    use vmtest_guest_daemon::{CliOutcome, GlazewmCli, SutProcesses, TopologySource, serve};
-    use vmtest_protocol::{DisplayDto, SutProgram};
+    use vmtest_guest_daemon::{
+        CliOutcome, GlazewmCli, SutProcesses, TestWindowHost, TopologySource, serve,
+    };
+    use vmtest_protocol::{DisplayDto, SutProgram, TestWindowDto};
 
     struct LiveGuest {
         cli: ProcessGlazewmCli,
         glazewm: std::path::PathBuf,
+        test_windows: LaunchedApp,
+    }
+
+    impl TestWindowHost for LiveGuest {
+        fn open(&self, count: u32) -> Result<Vec<u32>, String> {
+            self.test_windows.open(count)
+        }
+
+        fn windows(&self) -> Result<Vec<TestWindowDto>, String> {
+            Ok(self
+                .test_windows
+                .handles()?
+                .into_iter()
+                .map(|(id, handle)| TestWindowDto {
+                    id,
+                    handle,
+                    frame: win32::window_frame(handle),
+                })
+                .collect())
+        }
     }
 
     impl SutProcesses for LiveGuest {
@@ -68,6 +92,7 @@ fn main() -> std::io::Result<()> {
             executable: sut.join("glazewm-cli.exe"),
         },
         glazewm: sut.join("glazewm.exe"),
+        test_windows: LaunchedApp::new(directory.join("vmtest-test-window-win32.exe")),
     });
     let listener = TcpListener::bind(&address)?;
     log(format!("listening on {address}"));

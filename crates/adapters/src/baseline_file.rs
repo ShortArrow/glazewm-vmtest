@@ -3,7 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 use vmtest_domain::baseline::Baseline;
-use vmtest_domain::scenario::{GlazewmIpc, MonitorLayout, Observation, WorkspaceLayout};
+use vmtest_domain::scenario::{
+    GlazewmIpc, ManagedWindow, MonitorLayout, Observation, TestWindow, WorkspaceLayout,
+};
 use vmtest_domain::topology::Rect;
 
 /// Writes `baseline` as pretty-printed JSON ending with a newline, so that a re-recording reads as a diff.
@@ -49,7 +51,22 @@ struct BaselineFile {
 #[serde(deny_unknown_fields)]
 struct ObservationFile {
     os_displays: Vec<RectFile>,
+    test_windows: Vec<TestWindowFile>,
     glazewm: GlazewmFile,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TestWindowFile {
+    id: u32,
+    frame: Option<RectFile>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WindowFile {
+    test_window: Option<u32>,
+    state: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,6 +94,7 @@ struct WorkspaceFile {
     is_displayed: bool,
     has_focus: bool,
     tiling_direction: String,
+    windows: Vec<WindowFile>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -95,6 +113,14 @@ impl From<&Observation> for ObservationFile {
                 .os_displays()
                 .iter()
                 .map(RectFile::from)
+                .collect(),
+            test_windows: observation
+                .test_windows()
+                .iter()
+                .map(|window| TestWindowFile {
+                    id: window.id,
+                    frame: window.frame.as_ref().map(RectFile::from),
+                })
                 .collect(),
             glazewm: match observation.glazewm() {
                 GlazewmIpc::Answered(monitors) => GlazewmFile::Answered {
@@ -118,6 +144,13 @@ impl From<ObservationFile> for Observation {
         };
         Observation::new(
             file.os_displays.into_iter().map(Rect::from).collect(),
+            file.test_windows
+                .into_iter()
+                .map(|window| TestWindow {
+                    id: window.id,
+                    frame: window.frame.map(Rect::from),
+                })
+                .collect(),
             glazewm,
         )
     }
@@ -158,6 +191,14 @@ impl From<&WorkspaceLayout> for WorkspaceFile {
             is_displayed: workspace.is_displayed,
             has_focus: workspace.has_focus,
             tiling_direction: workspace.tiling_direction.clone(),
+            windows: workspace
+                .windows
+                .iter()
+                .map(|window| WindowFile {
+                    test_window: window.test_window,
+                    state: window.state.clone(),
+                })
+                .collect(),
         }
     }
 }
@@ -169,6 +210,14 @@ impl From<WorkspaceFile> for WorkspaceLayout {
             is_displayed: file.is_displayed,
             has_focus: file.has_focus,
             tiling_direction: file.tiling_direction,
+            windows: file
+                .windows
+                .into_iter()
+                .map(|window| ManagedWindow {
+                    test_window: window.test_window,
+                    state: window.state,
+                })
+                .collect(),
         }
     }
 }
@@ -198,7 +247,9 @@ impl From<RectFile> for Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmtest_domain::scenario::{GlazewmIpc, MonitorLayout, Observation, WorkspaceLayout};
+    use vmtest_domain::scenario::{
+        GlazewmIpc, ManagedWindow, MonitorLayout, Observation, TestWindow, WorkspaceLayout,
+    };
     use vmtest_domain::topology::Rect;
 
     const RECT: Rect = Rect {
@@ -211,6 +262,13 @@ mod tests {
     fn answered() -> Observation {
         Observation::new(
             vec![RECT],
+            vec![
+                TestWindow {
+                    id: 0,
+                    frame: Some(RECT),
+                },
+                TestWindow { id: 1, frame: None },
+            ],
             GlazewmIpc::Answered(vec![MonitorLayout {
                 bounds: RECT,
                 working_area: RECT,
@@ -221,6 +279,16 @@ mod tests {
                     is_displayed: true,
                     has_focus: true,
                     tiling_direction: "horizontal".into(),
+                    windows: vec![
+                        ManagedWindow {
+                            test_window: Some(0),
+                            state: "tiling".into(),
+                        },
+                        ManagedWindow {
+                            test_window: None,
+                            state: "floating".into(),
+                        },
+                    ],
                 }],
             }]),
         )
@@ -233,8 +301,8 @@ mod tests {
             steps: vec![
                 Some(answered()),
                 None,
-                Some(Observation::new(vec![], GlazewmIpc::NoAnswer)),
-                Some(Observation::new(vec![RECT], GlazewmIpc::NotRunning)),
+                Some(Observation::new(vec![], vec![], GlazewmIpc::NoAnswer)),
+                Some(Observation::new(vec![RECT], vec![], GlazewmIpc::NotRunning)),
             ],
         };
 
@@ -247,7 +315,7 @@ mod tests {
             sut_commit: "5709ad0a".into(),
             steps: vec![
                 None,
-                Some(Observation::new(vec![RECT], GlazewmIpc::NoAnswer)),
+                Some(Observation::new(vec![RECT], vec![], GlazewmIpc::NoAnswer)),
             ],
         };
 
@@ -266,6 +334,7 @@ mod tests {
           "height": 800
         }
       ],
+      "test_windows": [],
       "glazewm": {
         "answer": "no_answer"
       }

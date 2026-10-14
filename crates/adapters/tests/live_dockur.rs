@@ -1,6 +1,6 @@
 //! Runs a scenario against the dockur/windows guest in guests/dockur-windows.
 //!
-//! Needs `cargo build --release -p vmtest-guest-daemon`, glazewm built into target/sut/glazewm/release
+//! Needs `cargo build --release -p vmtest-guest-daemon -p vmtest-test-window-win32`, glazewm built into target/sut/glazewm/release
 //! (or the directory named by `VMTEST_GLAZEWM_BUILD`), and the guest image of docs/GUEST-IMAGE.md.
 //!
 //! A scenario with a baseline compares its observations with baselines/<name>.json. With
@@ -48,6 +48,7 @@ fn config(name: &str, glazewm_config: &str) -> DockurConfig {
         user: "fixture".into(),
         daemon_address: "127.0.0.1:7041".into(),
         daemon_executable: repository.join("target/release/vmtest-guest-daemon.exe"),
+        test_window_executable: repository.join("target/release/vmtest-test-window-win32.exe"),
         glazewm_build: std::env::var_os("VMTEST_GLAZEWM_BUILD")
             .map(PathBuf::from)
             .unwrap_or_else(|| repository.join("target/sut/glazewm/release")),
@@ -96,6 +97,40 @@ fn glazewm_tracks_virtual_monitor_count_changes() {
 }
 
 /// Compares `observations` with baselines/`name`.json, or records that file when `VMTEST_RECORD=1`.
+#[test]
+#[ignore = "needs the dockur/windows guest and prebuilt binaries"]
+fn tiled_test_windows_stay_within_their_working_area_across_monitor_count_changes() {
+    let scenario = Scenario {
+        name: "test windows across monitor count changes".into(),
+        virtual_monitors: 1,
+        steps: vec![
+            Step::OpenTestWindows(3),
+            Step::SetVirtualMonitorCount(3),
+            Step::SetVirtualMonitorCount(1),
+            Step::RemoveVirtualMonitors,
+            Step::RestoreVirtualMonitors,
+        ],
+        ipc_limit: DEFAULT_IPC_LIMIT,
+    };
+    let guest = config("glazewm-config.yaml", &quiet_glazewm_config());
+
+    let outcomes = run(
+        &scenario,
+        &mut DockurGuest::new(guest),
+        &mut SystemClock::start(),
+        SETTLE,
+    )
+    .unwrap();
+
+    let observations: Vec<_> = outcomes.iter().map(|o| o.observation.clone()).collect();
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    let deviations = compare_or_record("test-windows-across-monitor-count-changes", &observations);
+    assert_eq!(
+        (verdicts, deviations),
+        (vec![StepVerdict::Passed; 6], vec![])
+    );
+}
+
 fn compare_or_record(name: &str, observations: &[Option<Observation>]) -> Vec<Deviation> {
     let path = repository().join("baselines").join(format!("{name}.json"));
     if std::env::var("VMTEST_RECORD").as_deref() == Ok("1") {

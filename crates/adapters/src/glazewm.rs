@@ -3,25 +3,36 @@
 //! The JSON is read without glazewm's own types, so that SUT commits with a different IPC schema can still be observed.
 
 use serde_json::Value;
-use vmtest_domain::scenario::{GlazewmIpc, MonitorLayout, WorkspaceLayout};
+use vmtest_domain::scenario::{GlazewmIpc, ManagedWindow, MonitorLayout, WorkspaceLayout};
 use vmtest_domain::topology::Rect;
 use vmtest_protocol::Response;
 
 /// Reads the guest daemon's answer to a `query monitors` as what glazewm answered.
 ///
-/// A daemon-side error says nothing about glazewm, so it is an error of the harness, not `NoAnswer`.
-pub fn monitors_answer(response: Response) -> Result<GlazewmIpc, String> {
+/// `test_windows` holds the id and handle of each test window, so that the windows glazewm manages can be
+/// told apart by id. A daemon-side error says nothing about glazewm, so it is an error of the harness, not `NoAnswer`.
+pub fn monitors_answer(
+    response: Response,
+    test_windows: &[(u32, i64)],
+) -> Result<GlazewmIpc, String> {
     match response {
-        Response::Output { stdout, .. } => monitor_layouts(&stdout).map(GlazewmIpc::Answered),
+        Response::Output { stdout, .. } => {
+            monitor_layouts(&stdout, test_windows).map(GlazewmIpc::Answered)
+        }
         Response::TimedOut { .. } => Ok(GlazewmIpc::NoAnswer),
         other => Err(format!("unexpected answer to a glazewm query: {other:?}")),
     }
 }
 
-/// Reads the monitors, and the workspaces on each, from the output of `glazewm-cli query monitors`.
+/// Reads the monitors, the workspaces on each and the windows on those, from the output of
+/// `glazewm-cli query monitors`.
 ///
-/// Identifiers that change between runs (container ids, handles, device names) are not read.
-pub fn monitor_layouts(stdout: &str) -> Result<Vec<MonitorLayout>, String> {
+/// Identifiers that change between runs (container ids, handles, device names) are not kept; a window's
+/// handle only picks its id out of `test_windows`, pairs of id and handle.
+pub fn monitor_layouts(
+    stdout: &str,
+    test_windows: &[(u32, i64)],
+) -> Result<Vec<MonitorLayout>, String> {
     let answer: Value = serde_json::from_str(stdout.trim())
         .map_err(|error| format!("glazewm-cli printed something other than JSON: {error}"))?;
     if answer["success"] != Value::Bool(true) {
@@ -32,11 +43,11 @@ pub fn monitor_layouts(stdout: &str) -> Result<Vec<MonitorLayout>, String> {
         .as_array()
         .ok_or("glazewm's answer has no data.monitors array")?
         .iter()
-        .map(monitor_layout)
+        .map(|monitor| monitor_layout(monitor, test_windows))
         .collect()
 }
 
-fn monitor_layout(monitor: &Value) -> Result<MonitorLayout, String> {
+fn monitor_layout(monitor: &Value, test_windows: &[(u32, i64)]) -> Result<MonitorLayout, String> {
     let working = &monitor["workingRect"];
     let left = int(working, "left")?;
     let top = int(working, "top")?;
@@ -60,18 +71,54 @@ fn monitor_layout(monitor: &Value) -> Result<MonitorLayout, String> {
             .ok_or("a monitor in glazewm's answer has no children array")?
             .iter()
             .filter(|child| child["type"] == "workspace")
-            .map(workspace_layout)
+            .map(|workspace| workspace_layout(workspace, test_windows))
             .collect::<Result<_, _>>()?,
     })
 }
 
-fn workspace_layout(workspace: &Value) -> Result<WorkspaceLayout, String> {
+fn workspace_layout(
+    workspace: &Value,
+    test_windows: &[(u32, i64)],
+) -> Result<WorkspaceLayout, String> {
+    let mut windows = Vec::new();
+    collect_windows(workspace, test_windows, &mut windows)?;
     Ok(WorkspaceLayout {
         name: text(workspace, "name")?,
         is_displayed: boolean(workspace, "isDisplayed")?,
         has_focus: boolean(workspace, "hasFocus")?,
         tiling_direction: text(workspace, "tilingDirection")?,
+        windows,
     })
+}
+
+/// Appends the windows among `container`'s descendants in depth-first order, the order glazewm lays them out.
+fn collect_windows(
+    container: &Value,
+    test_windows: &[(u32, i64)],
+    windows: &mut Vec<ManagedWindow>,
+) -> Result<(), String> {
+    let children = container["children"]
+        .as_array()
+        .ok_or("a container in glazewm's answer has no children array")?;
+    for child in children {
+        match child["type"].as_str() {
+            Some("window") => {
+                let handle = child["handle"]
+                    .as_i64()
+                    .ok_or("a window in glazewm's answer has no integer handle")?;
+                windows.push(ManagedWindow {
+                    test_window: test_windows
+                        .iter()
+                        .find(|(_, test_handle)| *test_handle == handle)
+                        .map(|(id, _)| *id),
+                    state: text(&child["state"], "type")?,
+                });
+            }
+            Some("split") => collect_windows(child, test_windows, windows)?,
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn int(object: &Value, field: &str) -> Result<i32, String> {
@@ -123,7 +170,7 @@ mod tests {
     #[test]
     fn a_timed_out_monitors_query_is_no_answer() {
         assert_eq!(
-            monitors_answer(Response::TimedOut { limit_ms: 2000 }),
+            monitors_answer(Response::TimedOut { limit_ms: 2000 }, &[]),
             Ok(GlazewmIpc::NoAnswer)
         );
     }
@@ -134,7 +181,7 @@ mod tests {
             message: "glazewm-cli.exe not found".into(),
         };
 
-        assert!(monitors_answer(response).is_err());
+        assert!(monitors_answer(response, &[]).is_err());
     }
 
     #[test]
@@ -190,20 +237,51 @@ mod tests {
                     is_displayed: true,
                     has_focus: true,
                     tiling_direction: "horizontal".into(),
+                    windows: vec![],
                 },
                 WorkspaceLayout {
                     name: "2".into(),
                     is_displayed: false,
                     has_focus: false,
                     tiling_direction: "vertical".into(),
+                    windows: vec![],
                 },
             ],
         }
     }
 
     #[test]
+    fn reads_the_windows_of_a_workspace_in_glazewm_order_through_split_containers() {
+        let stdout = ONE_MONITOR.replace(
+            r#""tilingDirection":"horizontal","children":[]"#,
+            r#""tilingDirection":"horizontal","children":[
+                {"type":"window","handle":200,"state":{"type":"tiling"},"x":0,"y":0,"width":1,"height":1},
+                {"type":"split","tilingDirection":"vertical","children":[
+                    {"type":"window","handle":300,"state":{"type":"floating","centered":true},"x":0,"y":0,"width":1,"height":1}
+                ]}
+            ]"#,
+        );
+
+        let monitors = monitor_layouts(&stdout, &[(4, 300)]).unwrap();
+
+        assert_eq!(
+            monitors[0].workspaces[0].windows,
+            [
+                ManagedWindow {
+                    test_window: None,
+                    state: "tiling".into()
+                },
+                ManagedWindow {
+                    test_window: Some(4),
+                    state: "floating".into()
+                }
+            ]
+        );
+    }
+
+    #[test]
     fn reads_each_monitor_with_its_workspaces_in_glazewm_order() {
-        assert_eq!(monitor_layouts(ONE_MONITOR), Ok(vec![one_monitor()]));
+        assert_eq!(monitor_layouts(ONE_MONITOR, &[]), Ok(vec![one_monitor()]));
     }
 
     #[test]
@@ -215,7 +293,7 @@ mod tests {
         };
 
         assert_eq!(
-            monitors_answer(response),
+            monitors_answer(response, &[]),
             Ok(GlazewmIpc::Answered(vec![one_monitor()]))
         );
     }
@@ -224,7 +302,7 @@ mod tests {
     fn ignores_fields_it_does_not_know() {
         let stdout = ONE_MONITOR.replace(r#""dpi":144"#, r#""dpi":144,"newField":[1]"#);
 
-        assert_eq!(monitor_layouts(&stdout), Ok(vec![one_monitor()]));
+        assert_eq!(monitor_layouts(&stdout, &[]), Ok(vec![one_monitor()]));
     }
 
     #[test]
@@ -232,7 +310,7 @@ mod tests {
         let stdout = r#"{"clientMessage":"query monitors","data":null,"error":"WM is not running","success":false}"#;
 
         assert_eq!(
-            monitor_layouts(stdout),
+            monitor_layouts(stdout, &[]),
             Err("glazewm answered with an error: WM is not running".into())
         );
     }
@@ -241,6 +319,6 @@ mod tests {
     fn a_monitor_without_its_bounds_is_an_error() {
         let stdout = ONE_MONITOR.replace(r#""x":1280,"#, "");
 
-        assert!(monitor_layouts(&stdout).is_err());
+        assert!(monitor_layouts(&stdout, &[]).is_err());
     }
 }

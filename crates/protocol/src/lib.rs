@@ -1,4 +1,5 @@
-//! Messages between the runner and the guest daemon: JSON, one object per line.
+//! Messages between the runner and the guest daemon, and between the guest daemon and the test-window
+//! applications: JSON, one object per line.
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -20,6 +21,12 @@ pub enum Request {
     SutRunning {
         program: SutProgram,
     },
+    /// Opens `count` more test windows and answers once each exists.
+    OpenTestWindows {
+        count: u32,
+    },
+    /// Asks for every test window opened so far, with its frame as the OS reports it.
+    TestWindows,
 }
 
 /// The SUT programs the harness deploys into the guest.
@@ -66,6 +73,12 @@ pub enum Response {
     Running {
         running: bool,
     },
+    TestWindowsOpened {
+        ids: Vec<u32>,
+    },
+    TestWindows {
+        windows: Vec<TestWindowDto>,
+    },
     Error {
         message: String,
     },
@@ -87,6 +100,42 @@ pub struct DisplayDto {
     pub bounds: RectDto,
     pub working_area: RectDto,
     pub is_primary: bool,
+}
+
+/// One test window as the guest daemon reports it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestWindowDto {
+    /// The number the guest daemon gave it, counting from 0 in the order of opening.
+    pub id: u32,
+    /// The window handle, which glazewm reports for the windows it manages.
+    pub handle: i64,
+    /// The visible frame, in physical pixels, or `None` when the window no longer exists.
+    pub frame: Option<RectDto>,
+}
+
+/// What the guest daemon tells a test-window application to do.
+///
+/// Every test-window application, whatever its UI framework, connects to the address given as its only
+/// argument and reads these, one per line.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AppCommand {
+    /// Opens a normal top-level window, persistent and responsive, identified by `id`.
+    Open { id: u32 },
+}
+
+/// What a test-window application answers, one line per command.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AppReply {
+    /// The window exists, with this handle.
+    Opened {
+        id: u32,
+        handle: i64,
+    },
+    Error {
+        message: String,
+    },
 }
 
 /// A line that is not a valid message.
@@ -189,6 +238,64 @@ mod tests {
         let decoded: Response = decode_line(&encode_line(&response)).unwrap();
 
         assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn asks_for_a_number_of_test_windows() {
+        assert_eq!(
+            encode_line(&Request::OpenTestWindows { count: 3 }),
+            "{\"type\":\"open_test_windows\",\"count\":3}
+"
+        );
+    }
+
+    #[test]
+    fn a_test_windows_answer_survives_a_round_trip() {
+        let response = Response::TestWindows {
+            windows: vec![
+                TestWindowDto {
+                    id: 0,
+                    handle: 0x1234,
+                    frame: Some(RectDto {
+                        x: 20,
+                        y: 20,
+                        width: 600,
+                        height: 400,
+                    }),
+                },
+                TestWindowDto {
+                    id: 1,
+                    handle: 0x5678,
+                    frame: None,
+                },
+            ],
+        };
+
+        let decoded: Response = decode_line(&encode_line(&response)).unwrap();
+
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn tells_a_test_window_application_to_open_a_window_by_id() {
+        assert_eq!(
+            encode_line(&AppCommand::Open { id: 4 }),
+            "{\"type\":\"open\",\"id\":4}
+"
+        );
+    }
+
+    #[test]
+    fn a_test_window_application_reports_the_handle_of_an_opened_window() {
+        let line = "{\"type\":\"opened\",\"id\":4,\"handle\":4660}";
+
+        assert_eq!(
+            decode_line::<AppReply>(line).unwrap(),
+            AppReply::Opened {
+                id: 4,
+                handle: 4660
+            }
+        );
     }
 
     #[test]

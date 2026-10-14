@@ -14,6 +14,32 @@ impl Rect {
     pub fn position(&self) -> (i32, i32) {
         (self.x, self.y)
     }
+
+    /// Whether `other` lies entirely within this rectangle; touching an edge counts as within.
+    pub fn contains(&self, other: &Rect) -> bool {
+        other.x >= self.x
+            && other.y >= self.y
+            && other.right() <= self.right()
+            && other.bottom() <= self.bottom()
+    }
+
+    fn right(&self) -> i64 {
+        i64::from(self.x) + i64::from(self.width)
+    }
+
+    fn bottom(&self) -> i64 {
+        i64::from(self.y) + i64::from(self.height)
+    }
+}
+
+impl std::fmt::Display for Rect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}x{} at ({}, {})",
+            self.width, self.height, self.x, self.y
+        )
+    }
 }
 
 /// One display as the guest OS reports it.
@@ -85,6 +111,48 @@ mod tests {
         let topology = Topology::new(vec![display("lower", 0, 1080), display("upper", 0, 0)]);
 
         assert_eq!(ids(topology.by_position()), ["upper", "lower"]);
+    }
+
+    const AREA: Rect = Rect {
+        x: 0,
+        y: 0,
+        width: 1280,
+        height: 760,
+    };
+
+    #[test]
+    fn contains_a_rectangle_inside_it_up_to_its_edges() {
+        assert!(AREA.contains(&AREA));
+        assert!(AREA.contains(&Rect {
+            x: 20,
+            y: 20,
+            width: 600,
+            height: 400
+        }));
+    }
+
+    #[test]
+    fn does_not_contain_a_rectangle_reaching_past_any_edge() {
+        let past_right = Rect {
+            x: 1000,
+            y: 0,
+            width: 281,
+            height: 100,
+        };
+        let past_top = Rect {
+            x: 0,
+            y: -1,
+            width: 100,
+            height: 100,
+        };
+
+        assert!(!AREA.contains(&past_right));
+        assert!(!AREA.contains(&past_top));
+    }
+
+    #[test]
+    fn shows_as_size_at_position() {
+        assert_eq!(AREA.to_string(), "1280x760 at (0, 0)");
     }
 
     #[test]

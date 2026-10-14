@@ -2,7 +2,10 @@
 
 use std::time::Duration;
 
-use vmtest_domain::invariant::{glazewm_answers_ipc, glazewm_is_running, monitor_count_matches};
+use vmtest_domain::invariant::{
+    glazewm_answers_ipc, glazewm_is_running, monitor_count_matches,
+    tiled_windows_within_working_area,
+};
 use vmtest_domain::scenario::{GlazewmIpc, Observation, Scenario, Step, StepOutcome, StepVerdict};
 use vmtest_domain::settle::{SettleState, SettleTracker};
 
@@ -27,6 +30,12 @@ pub trait DisplayController {
     fn set_virtual_monitor_count(&mut self, count: u32) -> Result<(), String>;
     fn remove_virtual_monitors(&mut self) -> Result<(), String>;
     fn restore_virtual_monitors(&mut self) -> Result<(), String>;
+}
+
+/// Starts and stops what the guest runs besides the SUT.
+pub trait WorkloadController {
+    /// Opens `count` more test windows and returns once each exists.
+    fn open_test_windows(&mut self, count: u32) -> Result<(), String>;
 }
 
 /// Reads the guest's current state.
@@ -59,7 +68,7 @@ pub fn run<G>(
     settle: SettleSettings,
 ) -> Result<Vec<StepOutcome>, String>
 where
-    G: Hypervisor + GuestExecutor + DisplayController + Observer,
+    G: Hypervisor + GuestExecutor + DisplayController + WorkloadController + Observer,
 {
     guest.restore()?;
     guest.wait_until_ready()?;
@@ -73,11 +82,15 @@ where
     Ok(outcomes)
 }
 
-fn apply(step: &Step, guest: &mut impl DisplayController) -> Result<(), String> {
+fn apply(
+    step: &Step,
+    guest: &mut (impl DisplayController + WorkloadController),
+) -> Result<(), String> {
     match step {
         Step::SetVirtualMonitorCount(count) => guest.set_virtual_monitor_count(*count),
         Step::RemoveVirtualMonitors => guest.remove_virtual_monitors(),
         Step::RestoreVirtualMonitors => guest.restore_virtual_monitors(),
+        Step::OpenTestWindows(count) => guest.open_test_windows(*count),
     }
 }
 
@@ -125,22 +138,25 @@ fn judge(observation: Option<&Observation>) -> StepVerdict {
         return StepVerdict::Unsettled;
     };
     let checked = match observation.glazewm() {
-        GlazewmIpc::Answered(monitors) => {
-            monitor_count_matches(observation.os_displays().len(), monitors.len())
-        }
-        GlazewmIpc::NoAnswer => glazewm_answers_ipc(observation.glazewm()),
-        GlazewmIpc::NotRunning => glazewm_is_running(observation.glazewm()),
+        GlazewmIpc::Answered(monitors) => vec![
+            monitor_count_matches(observation.os_displays().len(), monitors.len()),
+            tiled_windows_within_working_area(monitors, observation.test_windows()),
+        ],
+        GlazewmIpc::NoAnswer => vec![glazewm_answers_ipc(observation.glazewm())],
+        GlazewmIpc::NotRunning => vec![glazewm_is_running(observation.glazewm())],
     };
-    match checked {
-        Ok(()) => StepVerdict::Passed,
-        Err(violation) => StepVerdict::Violated(vec![violation]),
+    let violations: Vec<_> = checked.into_iter().filter_map(Result::err).collect();
+    if violations.is_empty() {
+        StepVerdict::Passed
+    } else {
+        StepVerdict::Violated(violations)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmtest_domain::scenario::MonitorLayout;
+    use vmtest_domain::scenario::{ManagedWindow, MonitorLayout, TestWindow, WorkspaceLayout};
     use vmtest_domain::topology::Rect;
 
     const SETTLE: SettleSettings = SettleSettings {
@@ -212,6 +228,13 @@ mod tests {
         }
     }
 
+    impl WorkloadController for FakeGuest {
+        fn open_test_windows(&mut self, count: u32) -> Result<(), String> {
+            self.log.push(format!("open_test_windows {count}"));
+            Ok(())
+        }
+    }
+
     impl Observer for FakeGuest {
         fn observe(&mut self, ipc_limit: Duration) -> Result<Observation, String> {
             self.ipc_limits.push(ipc_limit);
@@ -245,15 +268,15 @@ mod tests {
                 workspaces: vec![],
             })
             .collect();
-        Observation::new(rects(os_displays), GlazewmIpc::Answered(monitors))
+        Observation::new(rects(os_displays), vec![], GlazewmIpc::Answered(monitors))
     }
 
     fn unanswered(os_displays: usize) -> Observation {
-        Observation::new(rects(os_displays), GlazewmIpc::NoAnswer)
+        Observation::new(rects(os_displays), vec![], GlazewmIpc::NoAnswer)
     }
 
     fn not_running(os_displays: usize) -> Observation {
-        Observation::new(rects(os_displays), GlazewmIpc::NotRunning)
+        Observation::new(rects(os_displays), vec![], GlazewmIpc::NotRunning)
     }
 
     fn verdicts(outcomes: Vec<StepOutcome>) -> Vec<StepVerdict> {
@@ -293,6 +316,75 @@ mod tests {
                 "start_sut",
                 "set_virtual_monitor_count 3"
             ]
+        );
+    }
+
+    #[test]
+    fn opens_test_windows_as_a_step() {
+        let mut guest = FakeGuest::observing(vec![observed(2, 2)]);
+
+        run(
+            &scenario(vec![Step::OpenTestWindows(3)]),
+            &mut guest,
+            &mut FakeClock(Duration::ZERO),
+            SETTLE,
+        )
+        .unwrap();
+
+        assert_eq!(guest.log.last().unwrap(), "open_test_windows 3");
+    }
+
+    #[test]
+    fn reports_every_invariant_a_settled_state_violates() {
+        let reaching_past_its_monitor = Rect {
+            x: 700,
+            y: 0,
+            width: 800,
+            height: 600,
+        };
+        let monitor = MonitorLayout {
+            bounds: rects(1)[0],
+            working_area: rects(1)[0],
+            dpi: 96,
+            has_focus: true,
+            workspaces: vec![WorkspaceLayout {
+                name: "1".into(),
+                is_displayed: true,
+                has_focus: true,
+                tiling_direction: "horizontal".into(),
+                windows: vec![ManagedWindow {
+                    test_window: Some(0),
+                    state: "tiling".into(),
+                }],
+            }],
+        };
+        let observation = Observation::new(
+            rects(2),
+            vec![TestWindow {
+                id: 0,
+                frame: Some(reaching_past_its_monitor),
+            }],
+            GlazewmIpc::Answered(vec![monitor]),
+        );
+        let mut guest = FakeGuest::observing(vec![observation]);
+
+        let verdicts = verdicts(
+            run(
+                &scenario(vec![]),
+                &mut guest,
+                &mut FakeClock(Duration::ZERO),
+                SETTLE,
+            )
+            .unwrap(),
+        );
+
+        let StepVerdict::Violated(violations) = &verdicts[0] else {
+            panic!("expected violations, got {verdicts:?}");
+        };
+        let invariants: Vec<_> = violations.iter().map(|v| v.invariant).collect();
+        assert_eq!(
+            invariants,
+            ["monitor_count_matches", "tiled_windows_within_working_area"]
         );
     }
 

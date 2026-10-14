@@ -14,6 +14,8 @@ pub enum Step {
     RemoveVirtualMonitors,
     /// Brings back the virtual monitors removed by `RemoveVirtualMonitors`.
     RestoreVirtualMonitors,
+    /// Opens this many more test windows, one after another.
+    OpenTestWindows(u32),
 }
 
 /// Given an initial number of virtual monitors, when the steps run in order.
@@ -39,6 +41,25 @@ pub struct WorkspaceLayout {
     pub is_displayed: bool,
     pub has_focus: bool,
     pub tiling_direction: String,
+    /// The windows on this workspace, in glazewm's order with split containers flattened.
+    pub windows: Vec<ManagedWindow>,
+}
+
+/// One window glazewm manages, without the handle that changes between runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ManagedWindow {
+    /// The test window it is, or `None` for a window the harness did not open.
+    pub test_window: Option<u32>,
+    /// glazewm's window state: `tiling`, `floating`, `minimized` or `fullscreen`.
+    pub state: String,
+}
+
+/// A window the harness opened, identified by the number the guest daemon gave it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TestWindow {
+    pub id: u32,
+    /// The visible frame as the OS reports it, or `None` when the window no longer exists.
+    pub frame: Option<Rect>,
 }
 
 /// One monitor as glazewm reports it, with its workspaces in glazewm's order.
@@ -71,20 +92,32 @@ pub enum GlazewmIpc {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Observation {
     os_displays: Vec<Rect>,
+    test_windows: Vec<TestWindow>,
     glazewm: GlazewmIpc,
 }
 
 impl Observation {
-    /// Puts the guest OS's display bounds and glazewm's answer, in any order, into canonical form.
-    pub fn new(mut os_displays: Vec<Rect>, mut glazewm: GlazewmIpc) -> Self {
+    /// Puts the guest OS's display bounds, the test windows and glazewm's answer, in any order, into canonical form.
+    pub fn new(
+        mut os_displays: Vec<Rect>,
+        mut test_windows: Vec<TestWindow>,
+        mut glazewm: GlazewmIpc,
+    ) -> Self {
+        test_windows.sort_by_key(|window| window.id);
         os_displays.sort_by_key(Rect::position);
         if let GlazewmIpc::Answered(monitors) = &mut glazewm {
             monitors.sort_by_key(|monitor| monitor.bounds.position());
         }
         Self {
             os_displays,
+            test_windows,
             glazewm,
         }
+    }
+
+    /// The windows the harness opened, ordered by id.
+    pub fn test_windows(&self) -> &[TestWindow] {
+        &self.test_windows
     }
 
     /// The bounds of the displays the guest OS reports, ordered by position.
@@ -141,6 +174,7 @@ mod tests {
     fn orders_displays_and_monitors_left_to_right_then_top_to_bottom() {
         let observation = Observation::new(
             vec![rect(800, 0), rect(0, 600), rect(0, 0)],
+            vec![],
             GlazewmIpc::Answered(vec![monitor(800, 0), monitor(0, 0)]),
         );
 
@@ -155,9 +189,25 @@ mod tests {
     }
 
     #[test]
+    fn orders_test_windows_by_id() {
+        let window = |id| TestWindow { id, frame: None };
+
+        let observation = Observation::new(
+            vec![],
+            vec![window(2), window(0), window(1)],
+            GlazewmIpc::NoAnswer,
+        );
+
+        assert_eq!(
+            observation.test_windows(),
+            [window(0), window(1), window(2)]
+        );
+    }
+
+    #[test]
     fn observations_of_the_same_state_reported_in_different_orders_are_equal() {
-        let one = Observation::new(vec![rect(0, 0), rect(800, 0)], GlazewmIpc::NoAnswer);
-        let other = Observation::new(vec![rect(800, 0), rect(0, 0)], GlazewmIpc::NoAnswer);
+        let one = Observation::new(vec![rect(0, 0), rect(800, 0)], vec![], GlazewmIpc::NoAnswer);
+        let other = Observation::new(vec![rect(800, 0), rect(0, 0)], vec![], GlazewmIpc::NoAnswer);
 
         assert_eq!(one, other);
     }

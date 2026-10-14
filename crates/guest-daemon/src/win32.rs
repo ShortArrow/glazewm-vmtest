@@ -1,9 +1,10 @@
-//! Reads the guest's displays and processes through the Win32 API.
+//! Reads the guest's displays, processes and windows through the Win32 API.
 
 use std::path::Path;
 
 use vmtest_protocol::{DisplayDto, RectDto};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, LPARAM, RECT};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT};
+use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW,
 };
@@ -16,6 +17,7 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
+use windows::Win32::UI::WindowsAndMessaging::IsWindow;
 use windows::core::{BOOL, PWSTR};
 
 use crate::TopologySource;
@@ -86,6 +88,26 @@ fn rect(r: RECT) -> RectDto {
         y: r.top,
         width: (r.right - r.left).unsigned_abs(),
         height: (r.bottom - r.top).unsigned_abs(),
+    }
+}
+
+/// The visible frame of window `handle`, without the invisible resize borders, or `None` when it does not exist.
+pub fn window_frame(handle: i64) -> Option<RectDto> {
+    let window = HWND(handle as *mut std::ffi::c_void);
+    // SAFETY: `IsWindow` accepts any value; `frame` is a `RECT`, the size passed.
+    unsafe {
+        if !IsWindow(Some(window)).as_bool() {
+            return None;
+        }
+        let mut frame = RECT::default();
+        DwmGetWindowAttribute(
+            window,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut frame as *mut RECT as *mut std::ffi::c_void,
+            size_of::<RECT>() as u32,
+        )
+        .ok()?;
+        Some(rect(frame))
     }
 }
 
@@ -166,6 +188,11 @@ fn utf16_until_nul(text: &[u16]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn has_no_frame_for_a_window_that_does_not_exist() {
+        assert_eq!(window_frame(0), None);
+    }
 
     #[test]
     fn finds_the_running_test_executable_by_its_path() {
