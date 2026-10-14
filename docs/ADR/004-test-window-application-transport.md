@@ -22,6 +22,7 @@ The daemon listens on a loopback TCP port it picks for each application and star
 |---|---|
 | Standard input and output of a child process | An application started through a scheduled task, as an elevated one is, has no pipe to the daemon, so the privilege axis would need a second transport |
 | Named pipes | The standard libraries of some frameworks' languages, Dart among them, have no named-pipe client, so each such application would need its own workaround |
+| FlatBuffers instead of JSON | Its one gain here is a schema from which every language's types are generated, and a JSON Schema generated from the protocol crate gives the same while keeping messages readable in logs and writable with each language's standard library. Its speed does not matter at a few messages per step, and it defines no framing on a stream, which would have to be added |
 
 ## Consequences
 

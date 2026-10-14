@@ -7,7 +7,7 @@
 | 0 | Technical spikes | Feasibility and limits of every spike below are known, and a platform for phase 1 is chosen |
 | 1 | Record baselines for monitor add/remove and RDP disconnect/reconnect scenarios on the platform chosen in phase 0, using Win32 test windows only | The acceptance criteria in docs/PRD.md are met on that platform |
 | 2 | Add the other Windows platform (Hyper-V or dockur/windows) and run the same scenarios | Phase 1 scenarios run unchanged |
-| 3 | Random operation-sequence generation, repeated runs, and test windows for the other UI frameworks | A failed generated sequence can be re-run from its record |
+| 3 | Random operation-sequence generation, repeated runs, and test windows for the other UI frameworks, with a JSON Schema generated from the protocol crate and a conformance test that every test-window application passes | A failed generated sequence can be re-run from its record |
 | 4 | Test glazewm on a macOS guest on a Mac host (Virtualization.framework; Tart or similar) | On hold until an Apple Silicon Mac host is available. Starts with a spike on whether a macOS guest can present multiple displays and their hot-plug |
 
 ## Spikes
