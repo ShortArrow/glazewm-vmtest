@@ -27,7 +27,8 @@ The guest daemon listens on a TCP port inside the guest. The runner connects to 
 ## Consequences
 
 - The daemon has to be running before a scenario starts; the runner waits for it after every snapshot restore.
-- The port is published only on `127.0.0.1`, since the daemon starts processes and has no authentication. Requests are typed, and none carries a command line or arguments to pass through: a pass-through would let anyone reaching the port, such as another container on the same Docker network, run any program in the guest.
+- The daemon has no authentication. Anyone reaching its port, such as another container on the same Docker network, can read the guest's state and, once requests that start processes exist, disturb a running scenario. This is accepted while two premises hold: requests are typed and start only programs the harness provides, so none carries a command line or arguments to pass through, which would let anyone reaching the port run any program in the guest; and the guest holds no secrets. If either stops holding, this decision is revisited. The port is still published only on `127.0.0.1`.
+- Requests carry no identifier: on one connection the runner sends a request and waits for its response, and drops the connection when a response is late, so that it is not read as the next one's. This holds while every request is answered promptly; an operation that lasts, such as load, is split into a start request and a stop request. A request that cannot answer promptly is the point at which identifiers are added.
 - Request and response types are shared between the runner and the daemon as one Rust crate.
 
 ## History

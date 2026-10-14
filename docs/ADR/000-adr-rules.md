@@ -8,7 +8,7 @@ An ADR covers a decision that chose one option among several: the current choice
 ADRs are living documents, one file per decision. When the forces change, the same file is rewritten.
 The body states only the current decision. Earlier decisions are reached through the History table, which points at the commits that hold them.
 
-How the system is arranged — what is where and how it works — belongs in docs/ARCHITECTURE.md. ADRs carry the reasons behind choices.
+How the system is arranged — what is where and how it works — belongs in docs/ARCHITECTURE.md. ADRs carry the reasons behind choices made between alternatives; the reasons for the rest of the arrangement stay in the design intent of docs/ARCHITECTURE.md. A reason is written in one of the two only, and docs/ARCHITECTURE.md points at the ADR that holds it.
 The reason for a single change goes in its commit message in one or two sentences; a commit that rewrites an ADR names the ADR by its title.
 
 ## When to write one
@@ -21,7 +21,7 @@ The reason for a single change goes in its commit message in one or two sentence
 - `docs/ADR/NNN-kebab-case-title.md`, where `NNN` is a three-digit sequence number. Name the file after the question, not the answer (e.g. `NNN-scenario-format.md`).
 - To reverse a decision, rewrite the "Decision" and the reasons in the same file, and add a row to "History". Do not create a new one.
 - When the question itself no longer exists, delete the file. Numbers are never reused.
-- A Japanese translation sits beside it with the same name and a `.jp.md` extension, using the Japanese headings shown in the translation of this file. Where the two differ, the English file applies.
+- A Japanese translation sits beside it with the same name and a `.jp.md` extension, using the Japanese headings shown in the translation of this file. Neither version takes precedence: a difference between them is a defect, and whoever finds it brings both into line.
 
 ## Body
 
@@ -63,4 +63,5 @@ Edits that leave the decision unchanged (wording, links, translation) add no row
 
 - Write the body in the present tense. Do not write "this used to be X" or "changed from Y" outside History.
 - When a premise breaks and the decision needs revisiting, set the status back to `Proposed`; set it to `Accepted` once the revision is done.
+- Only the repository owner's explicit approval sets the status to `Accepted`. Whoever proposes an ADR, a person or a coding agent, does not accept it.
 - Do not use names that only made sense in a conversation or during the work ("option B", "the thing we discussed"); say what is meant.
