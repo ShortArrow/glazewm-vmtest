@@ -1,6 +1,6 @@
 # 003: How baselines are stored and compared
 
-- Status: Proposed
+- Status: Accepted
 
 ## Context
 
