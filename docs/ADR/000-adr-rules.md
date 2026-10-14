@@ -1,6 +1,6 @@
 # 000: How ADRs are written
 
-- Status: Proposed
+- Status: Accepted
 
 ## What an ADR is for
 

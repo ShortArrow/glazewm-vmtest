@@ -1,6 +1,6 @@
 # 000: ADRの書き方
 
-- 状態: Proposed
+- 状態: Accepted
 
 ## ADRの役割
 

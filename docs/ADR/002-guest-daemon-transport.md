@@ -1,6 +1,6 @@
 # 002: Transport between the runner and the guest daemon
 
-- Status: Proposed
+- Status: Accepted
 
 ## Context
 
