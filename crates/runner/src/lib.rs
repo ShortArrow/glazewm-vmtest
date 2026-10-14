@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use vmtest_domain::invariant::{glazewm_answers_ipc, monitor_count_matches};
-use vmtest_domain::scenario::{GlazewmIpc, Observation, Scenario, Step, StepVerdict};
+use vmtest_domain::scenario::{GlazewmIpc, Observation, Scenario, Step, StepOutcome, StepVerdict};
 use vmtest_domain::settle::{SettleState, SettleTracker};
 
 /// Brings the guest back to its snapshot.
@@ -49,7 +49,7 @@ pub struct SettleSettings {
     pub poll: Duration,
 }
 
-/// Runs `scenario` and returns one verdict for start-up (step 0) and one per step.
+/// Runs `scenario` and returns the outcome of start-up (step 0) and of each step.
 ///
 /// The Given monitors are in place before the SUT starts. Invariants are judged only on settled states.
 pub fn run<G>(
@@ -57,7 +57,7 @@ pub fn run<G>(
     guest: &mut G,
     clock: &mut dyn Clock,
     settle: SettleSettings,
-) -> Result<Vec<StepVerdict>, String>
+) -> Result<Vec<StepOutcome>, String>
 where
     G: Hypervisor + GuestExecutor + DisplayController + Observer,
 {
@@ -65,12 +65,12 @@ where
     guest.wait_until_ready()?;
     guest.set_virtual_monitor_count(scenario.virtual_monitors)?;
     guest.start_sut(scenario.ipc_limit)?;
-    let mut verdicts = vec![settled_verdict(scenario, guest, clock, settle)?];
+    let mut outcomes = vec![settled_outcome(scenario, guest, clock, settle)?];
     for step in &scenario.steps {
         apply(step, guest)?;
-        verdicts.push(settled_verdict(scenario, guest, clock, settle)?);
+        outcomes.push(settled_outcome(scenario, guest, clock, settle)?);
     }
-    Ok(verdicts)
+    Ok(outcomes)
 }
 
 fn apply(step: &Step, guest: &mut impl DisplayController) -> Result<(), String> {
@@ -81,13 +81,18 @@ fn apply(step: &Step, guest: &mut impl DisplayController) -> Result<(), String> 
     }
 }
 
-fn settled_verdict(
+fn settled_outcome(
     scenario: &Scenario,
     guest: &mut impl Observer,
     clock: &mut dyn Clock,
     settle: SettleSettings,
-) -> Result<StepVerdict, String> {
-    settled_observation(|| guest.observe(scenario.ipc_limit), clock, settle).map(judge)
+) -> Result<StepOutcome, String> {
+    let observation = settled_observation(|| guest.observe(scenario.ipc_limit), clock, settle)?;
+    let verdict = judge(observation.as_ref());
+    Ok(StepOutcome {
+        observation,
+        verdict,
+    })
 }
 
 /// Polls until nothing has changed for the settle window; `None` when the limit is reached first.
@@ -115,13 +120,15 @@ fn settled_observation(
 }
 
 /// Judges a settled observation; a glazewm that did not answer has no monitors to compare.
-fn judge(observation: Option<Observation>) -> StepVerdict {
+fn judge(observation: Option<&Observation>) -> StepVerdict {
     let Some(observation) = observation else {
         return StepVerdict::Unsettled;
     };
-    let checked = match observation.glazewm {
-        GlazewmIpc::Monitors(monitors) => monitor_count_matches(observation.os_displays, monitors),
-        GlazewmIpc::NoAnswer => glazewm_answers_ipc(&observation.glazewm),
+    let checked = match observation.glazewm() {
+        GlazewmIpc::Answered(monitors) => {
+            monitor_count_matches(observation.os_displays().len(), monitors.len())
+        }
+        GlazewmIpc::NoAnswer => glazewm_answers_ipc(observation.glazewm()),
     };
     match checked {
         Ok(()) => StepVerdict::Passed,
@@ -132,6 +139,8 @@ fn judge(observation: Option<Observation>) -> StepVerdict {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmtest_domain::scenario::MonitorLayout;
+    use vmtest_domain::topology::Rect;
 
     const SETTLE: SettleSettings = SettleSettings {
         window: Duration::from_secs(5),
@@ -213,18 +222,40 @@ mod tests {
         }
     }
 
+    fn rects(count: usize) -> Vec<Rect> {
+        (0..count)
+            .map(|i| Rect {
+                x: i as i32 * 800,
+                y: 0,
+                width: 800,
+                height: 600,
+            })
+            .collect()
+    }
+
     fn observed(os_displays: usize, glazewm_monitors: usize) -> Observation {
-        Observation {
-            os_displays,
-            glazewm: GlazewmIpc::Monitors(glazewm_monitors),
-        }
+        let monitors = rects(glazewm_monitors)
+            .into_iter()
+            .map(|bounds| MonitorLayout {
+                bounds,
+                working_area: bounds,
+                dpi: 96,
+                has_focus: false,
+                workspaces: vec![],
+            })
+            .collect();
+        Observation::new(rects(os_displays), GlazewmIpc::Answered(monitors))
     }
 
     fn unanswered(os_displays: usize) -> Observation {
-        Observation {
-            os_displays,
-            glazewm: GlazewmIpc::NoAnswer,
-        }
+        Observation::new(rects(os_displays), GlazewmIpc::NoAnswer)
+    }
+
+    fn verdicts(outcomes: Vec<StepOutcome>) -> Vec<StepVerdict> {
+        outcomes
+            .into_iter()
+            .map(|outcome| outcome.verdict)
+            .collect()
     }
 
     fn scenario(steps: Vec<Step>) -> Scenario {
@@ -264,13 +295,15 @@ mod tests {
     fn passes_start_up_and_every_step_when_glazewm_tracks_the_displays() {
         let mut guest = FakeGuest::observing(vec![observed(2, 2)]);
 
-        let verdicts = run(
-            &scenario(vec![Step::RemoveVirtualMonitors]),
-            &mut guest,
-            &mut FakeClock(Duration::ZERO),
-            SETTLE,
-        )
-        .unwrap();
+        let verdicts = verdicts(
+            run(
+                &scenario(vec![Step::RemoveVirtualMonitors]),
+                &mut guest,
+                &mut FakeClock(Duration::ZERO),
+                SETTLE,
+            )
+            .unwrap(),
+        );
 
         assert_eq!(verdicts, [StepVerdict::Passed, StepVerdict::Passed]);
     }
@@ -281,13 +314,15 @@ mod tests {
         observations.push(observed(4, 3));
         let mut guest = FakeGuest::observing(observations);
 
-        let verdicts = run(
-            &scenario(vec![Step::SetVirtualMonitorCount(3)]),
-            &mut guest,
-            &mut FakeClock(Duration::ZERO),
-            SETTLE,
-        )
-        .unwrap();
+        let verdicts = verdicts(
+            run(
+                &scenario(vec![Step::SetVirtualMonitorCount(3)]),
+                &mut guest,
+                &mut FakeClock(Duration::ZERO),
+                SETTLE,
+            )
+            .unwrap(),
+        );
 
         assert_eq!(verdicts[0], StepVerdict::Passed);
         assert!(
@@ -301,13 +336,15 @@ mod tests {
         observations.extend((0..40).map(|i| observed(2 + i % 2, 2 + i % 2)));
         let mut guest = FakeGuest::observing(observations);
 
-        let verdicts = run(
-            &scenario(vec![Step::SetVirtualMonitorCount(3)]),
-            &mut guest,
-            &mut FakeClock(Duration::ZERO),
-            SETTLE,
-        )
-        .unwrap();
+        let verdicts = verdicts(
+            run(
+                &scenario(vec![Step::SetVirtualMonitorCount(3)]),
+                &mut guest,
+                &mut FakeClock(Duration::ZERO),
+                SETTLE,
+            )
+            .unwrap(),
+        );
 
         assert_eq!(verdicts, [StepVerdict::Passed, StepVerdict::Unsettled]);
     }
@@ -319,22 +356,45 @@ mod tests {
         observations.push(observed(2, 2));
         let mut guest = FakeGuest::observing(observations);
 
-        let verdicts = run(
-            &scenario(vec![
-                Step::SetVirtualMonitorCount(3),
-                Step::SetVirtualMonitorCount(1),
-            ]),
-            &mut guest,
-            &mut FakeClock(Duration::ZERO),
-            SETTLE,
-        )
-        .unwrap();
+        let verdicts = verdicts(
+            run(
+                &scenario(vec![
+                    Step::SetVirtualMonitorCount(3),
+                    Step::SetVirtualMonitorCount(1),
+                ]),
+                &mut guest,
+                &mut FakeClock(Duration::ZERO),
+                SETTLE,
+            )
+            .unwrap(),
+        );
 
         assert_eq!(verdicts[0], StepVerdict::Passed);
         assert!(
             matches!(&verdicts[1], StepVerdict::Violated(v) if v.len() == 1 && v[0].invariant == "glazewm_answers_ipc")
         );
         assert_eq!(verdicts[2], StepVerdict::Passed);
+    }
+
+    #[test]
+    fn returns_the_settled_observation_of_each_step() {
+        let mut observations = vec![observed(2, 2); 6];
+        observations.push(observed(4, 4));
+        let mut guest = FakeGuest::observing(observations);
+
+        let outcomes = run(
+            &scenario(vec![Step::SetVirtualMonitorCount(3)]),
+            &mut guest,
+            &mut FakeClock(Duration::ZERO),
+            SETTLE,
+        )
+        .unwrap();
+
+        let settled: Vec<_> = outcomes
+            .into_iter()
+            .map(|outcome| outcome.observation)
+            .collect();
+        assert_eq!(settled, [Some(observed(2, 2)), Some(observed(4, 4))]);
     }
 
     #[test]

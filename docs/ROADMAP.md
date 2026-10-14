@@ -62,7 +62,6 @@ For each mechanism: can it present a monitor add/remove to the guest as a hot-pl
 | Control protocol between the guest daemon and test-window applications (command-line arguments, named pipe, stdin JSON) | Before phase 1 |
 | How the SUT is specified (sibling directory path, git submodule, commit hash) | Before phase 1 |
 | Scenario format (YAML, in-code DSL) | Before phase 1 |
-| Baseline storage format | Before phase 1 |
 | Whether the SUT is built with glazewm's `ui_access` feature, as the official release is; it takes effect only when signed and installed under a secure location, and it lets glazewm manage elevated windows | Before the privilege axis is tested |
 | Windows guest edition and licensing | Before phase 1 |
 

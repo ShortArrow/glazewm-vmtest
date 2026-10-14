@@ -6,6 +6,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use vmtest_domain::scenario::{GlazewmIpc, Observation};
+use vmtest_domain::topology::Rect;
 use vmtest_guest_client::GuestDaemonClient;
 use vmtest_protocol::{GlazewmQuery, Request, Response};
 use vmtest_runner::{Clock, DisplayController, GuestExecutor, Hypervisor, Observer};
@@ -242,14 +243,19 @@ impl DisplayController for DockurGuest {
 impl Observer for DockurGuest {
     fn observe(&mut self, ipc_limit: Duration) -> Result<Observation, String> {
         let os_displays = match self.request(&Request::Topology)? {
-            Response::Topology { displays } => displays.len(),
+            Response::Topology { displays } => displays
+                .iter()
+                .map(|display| Rect {
+                    x: display.bounds.x,
+                    y: display.bounds.y,
+                    width: display.bounds.width,
+                    height: display.bounds.height,
+                })
+                .collect(),
             other => return Err(format!("unexpected answer to topology: {other:?}")),
         };
         let glazewm = self.query_glazewm_monitors(ipc_limit)?;
-        Ok(Observation {
-            os_displays,
-            glazewm,
-        })
+        Ok(Observation::new(os_displays, glazewm))
     }
 }
 

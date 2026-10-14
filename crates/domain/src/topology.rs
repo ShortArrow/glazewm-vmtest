@@ -9,6 +9,13 @@ pub struct Rect {
     pub height: u32,
 }
 
+impl Rect {
+    /// The key that orders rectangles left to right, then top to bottom.
+    pub fn position(&self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+}
+
 /// One display as the guest OS reports it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Display {
@@ -37,7 +44,7 @@ impl Topology {
     /// zebar's `monitorSelection` of type `index` refer to.
     pub fn by_position(&self) -> Vec<&Display> {
         let mut displays: Vec<&Display> = self.displays.iter().collect();
-        displays.sort_by_key(|d| (d.bounds.x, d.bounds.y));
+        displays.sort_by_key(|d| d.bounds.position());
         displays
     }
 }

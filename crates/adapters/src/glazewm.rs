@@ -2,7 +2,9 @@
 //!
 //! The JSON is read without glazewm's own types, so that SUT commits with a different IPC schema can still be observed.
 
-use vmtest_domain::scenario::GlazewmIpc;
+use serde_json::Value;
+use vmtest_domain::scenario::{GlazewmIpc, MonitorLayout, WorkspaceLayout};
+use vmtest_domain::topology::Rect;
 use vmtest_protocol::Response;
 
 /// Reads the guest daemon's answer to a `query monitors` as what glazewm answered.
@@ -10,24 +12,86 @@ use vmtest_protocol::Response;
 /// A daemon-side error says nothing about glazewm, so it is an error of the harness, not `NoAnswer`.
 pub fn monitors_answer(response: Response) -> Result<GlazewmIpc, String> {
     match response {
-        Response::Output { stdout, .. } => monitor_count(&stdout).map(GlazewmIpc::Monitors),
+        Response::Output { stdout, .. } => monitor_layouts(&stdout).map(GlazewmIpc::Answered),
         Response::TimedOut { .. } => Ok(GlazewmIpc::NoAnswer),
         other => Err(format!("unexpected answer to a glazewm query: {other:?}")),
     }
 }
 
-/// Returns the number of monitors in the output of `glazewm-cli query monitors`.
-pub fn monitor_count(stdout: &str) -> Result<usize, String> {
-    let answer: serde_json::Value = serde_json::from_str(stdout.trim())
+/// Reads the monitors, and the workspaces on each, from the output of `glazewm-cli query monitors`.
+///
+/// Identifiers that change between runs (container ids, handles, device names) are not read.
+pub fn monitor_layouts(stdout: &str) -> Result<Vec<MonitorLayout>, String> {
+    let answer: Value = serde_json::from_str(stdout.trim())
         .map_err(|error| format!("glazewm-cli printed something other than JSON: {error}"))?;
-    if answer["success"] != serde_json::Value::Bool(true) {
+    if answer["success"] != Value::Bool(true) {
         let error = answer["error"].as_str().unwrap_or("no error message");
         return Err(format!("glazewm answered with an error: {error}"));
     }
     answer["data"]["monitors"]
         .as_array()
-        .map(Vec::len)
-        .ok_or_else(|| "glazewm's answer has no data.monitors array".into())
+        .ok_or("glazewm's answer has no data.monitors array")?
+        .iter()
+        .map(monitor_layout)
+        .collect()
+}
+
+fn monitor_layout(monitor: &Value) -> Result<MonitorLayout, String> {
+    let working = &monitor["workingRect"];
+    let left = int(working, "left")?;
+    let top = int(working, "top")?;
+    Ok(MonitorLayout {
+        bounds: Rect {
+            x: int(monitor, "x")?,
+            y: int(monitor, "y")?,
+            width: int(monitor, "width")?.unsigned_abs(),
+            height: int(monitor, "height")?.unsigned_abs(),
+        },
+        working_area: Rect {
+            x: left,
+            y: top,
+            width: (int(working, "right")? - left).unsigned_abs(),
+            height: (int(working, "bottom")? - top).unsigned_abs(),
+        },
+        dpi: int(monitor, "dpi")?.unsigned_abs(),
+        has_focus: boolean(monitor, "hasFocus")?,
+        workspaces: monitor["children"]
+            .as_array()
+            .ok_or("a monitor in glazewm's answer has no children array")?
+            .iter()
+            .filter(|child| child["type"] == "workspace")
+            .map(workspace_layout)
+            .collect::<Result<_, _>>()?,
+    })
+}
+
+fn workspace_layout(workspace: &Value) -> Result<WorkspaceLayout, String> {
+    Ok(WorkspaceLayout {
+        name: text(workspace, "name")?,
+        is_displayed: boolean(workspace, "isDisplayed")?,
+        has_focus: boolean(workspace, "hasFocus")?,
+        tiling_direction: text(workspace, "tilingDirection")?,
+    })
+}
+
+fn int(object: &Value, field: &str) -> Result<i32, String> {
+    object[field]
+        .as_i64()
+        .and_then(|value| i32::try_from(value).ok())
+        .ok_or_else(|| format!("glazewm's answer has no integer {field}"))
+}
+
+fn boolean(object: &Value, field: &str) -> Result<bool, String> {
+    object[field]
+        .as_bool()
+        .ok_or_else(|| format!("glazewm's answer has no boolean {field}"))
+}
+
+fn text(object: &Value, field: &str) -> Result<String, String> {
+    object[field]
+        .as_str()
+        .map(String::from)
+        .ok_or_else(|| format!("glazewm's answer has no string {field}"))
 }
 
 /// Returns glazewm's sample configuration with its startup and shutdown commands removed.
@@ -53,17 +117,8 @@ pub fn config_without_startup_commands(sample: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_finished_monitors_query_is_the_number_of_monitors() {
-        let response = Response::Output {
-            exit_code: Some(0),
-            stdout: r#"{"data":{"monitors":[{"id":"a"}]},"error":null,"success":true}"#.into(),
-            stderr: String::new(),
-        };
-
-        assert_eq!(monitors_answer(response), Ok(GlazewmIpc::Monitors(1)));
-    }
+    use vmtest_domain::scenario::WorkspaceLayout;
+    use vmtest_domain::topology::Rect;
 
     #[test]
     fn a_timed_out_monitors_query_is_no_answer() {
@@ -104,11 +159,72 @@ mod tests {
         );
     }
 
-    #[test]
-    fn counts_the_monitors_in_a_successful_answer() {
-        let stdout = r#"{"clientMessage":"query monitors","data":{"monitors":[{"id":"a"},{"id":"b"}]},"error":null,"success":true}"#;
+    const ONE_MONITOR: &str = r#"{"clientMessage":"query monitors","data":{"monitors":[
+        {"type":"monitor","id":"7f0c","x":1280,"y":0,"width":800,"height":600,"dpi":144,"hasFocus":true,
+         "workingRect":{"left":1280,"top":0,"right":2080,"bottom":560},
+         "children":[
+           {"type":"workspace","id":"a1","name":"1","isDisplayed":true,"hasFocus":true,"tilingDirection":"horizontal","children":[]},
+           {"type":"workspace","id":"b2","name":"2","isDisplayed":false,"hasFocus":false,"tilingDirection":"vertical","children":[]}
+         ]}
+    ]},"error":null,"success":true}"#;
 
-        assert_eq!(monitor_count(stdout), Ok(2));
+    fn one_monitor() -> MonitorLayout {
+        MonitorLayout {
+            bounds: Rect {
+                x: 1280,
+                y: 0,
+                width: 800,
+                height: 600,
+            },
+            working_area: Rect {
+                x: 1280,
+                y: 0,
+                width: 800,
+                height: 560,
+            },
+            dpi: 144,
+            has_focus: true,
+            workspaces: vec![
+                WorkspaceLayout {
+                    name: "1".into(),
+                    is_displayed: true,
+                    has_focus: true,
+                    tiling_direction: "horizontal".into(),
+                },
+                WorkspaceLayout {
+                    name: "2".into(),
+                    is_displayed: false,
+                    has_focus: false,
+                    tiling_direction: "vertical".into(),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn reads_each_monitor_with_its_workspaces_in_glazewm_order() {
+        assert_eq!(monitor_layouts(ONE_MONITOR), Ok(vec![one_monitor()]));
+    }
+
+    #[test]
+    fn a_finished_monitors_query_is_glazewm_answer() {
+        let response = Response::Output {
+            exit_code: Some(0),
+            stdout: ONE_MONITOR.into(),
+            stderr: String::new(),
+        };
+
+        assert_eq!(
+            monitors_answer(response),
+            Ok(GlazewmIpc::Answered(vec![one_monitor()]))
+        );
+    }
+
+    #[test]
+    fn ignores_fields_it_does_not_know() {
+        let stdout = ONE_MONITOR.replace(r#""dpi":144"#, r#""dpi":144,"newField":[1]"#);
+
+        assert_eq!(monitor_layouts(&stdout), Ok(vec![one_monitor()]));
     }
 
     #[test]
@@ -116,15 +232,15 @@ mod tests {
         let stdout = r#"{"clientMessage":"query monitors","data":null,"error":"WM is not running","success":false}"#;
 
         assert_eq!(
-            monitor_count(stdout),
+            monitor_layouts(stdout),
             Err("glazewm answered with an error: WM is not running".into())
         );
     }
 
     #[test]
-    fn ignores_fields_it_does_not_know() {
-        let stdout = r#"{"clientMessage":"query monitors","data":{"monitors":[{"id":"a","newField":1}],"extra":true},"error":null,"success":true,"version":"9"}"#;
+    fn a_monitor_without_its_bounds_is_an_error() {
+        let stdout = ONE_MONITOR.replace(r#""x":1280,"#, "");
 
-        assert_eq!(monitor_count(stdout), Ok(1));
+        assert!(monitor_layouts(&stdout).is_err());
     }
 }

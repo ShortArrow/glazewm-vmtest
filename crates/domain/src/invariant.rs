@@ -28,7 +28,7 @@ pub fn monitor_count_matches(os_displays: usize, glazewm_monitors: usize) -> Res
 /// Checks that glazewm answered the IPC query within the scenario's time limit.
 pub fn glazewm_answers_ipc(answer: &GlazewmIpc) -> Result<(), Violation> {
     match answer {
-        GlazewmIpc::Monitors(_) => Ok(()),
+        GlazewmIpc::Answered(_) => Ok(()),
         GlazewmIpc::NoAnswer => Err(Violation {
             invariant: "glazewm_answers_ipc",
             expected: "an answer within the IPC time limit".into(),
@@ -43,7 +43,7 @@ mod tests {
 
     #[test]
     fn holds_when_glazewm_answers_ipc() {
-        assert_eq!(glazewm_answers_ipc(&GlazewmIpc::Monitors(2)), Ok(()));
+        assert_eq!(glazewm_answers_ipc(&GlazewmIpc::Answered(vec![])), Ok(()));
     }
 
     #[test]

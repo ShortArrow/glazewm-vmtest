@@ -2,13 +2,18 @@
 //!
 //! Needs `cargo build --release -p vmtest-guest-daemon`, glazewm built into target/sut/glazewm/release
 //! (or the directory named by `VMTEST_GLAZEWM_BUILD`), and the guest image of docs/GUEST-IMAGE.md.
+//!
+//! A scenario with a baseline compares its observations with baselines/<name>.json. With
+//! `VMTEST_RECORD=1` it records that file instead, from the glazewm commit named by `VMTEST_SUT_COMMIT`.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use vmtest_adapters::baseline_file;
 use vmtest_adapters::dockur::{DockurConfig, DockurGuest, SystemClock};
 use vmtest_adapters::glazewm::config_without_startup_commands;
-use vmtest_domain::scenario::{DEFAULT_IPC_LIMIT, Scenario, Step, StepVerdict};
+use vmtest_domain::baseline::{Baseline, Deviation};
+use vmtest_domain::scenario::{DEFAULT_IPC_LIMIT, Observation, Scenario, Step, StepVerdict};
 use vmtest_runner::{SettleSettings, run};
 
 fn repository() -> PathBuf {
@@ -73,7 +78,7 @@ fn glazewm_tracks_virtual_monitor_count_changes() {
     };
     let guest = config("glazewm-config.yaml", &quiet_glazewm_config());
 
-    let verdicts = run(
+    let outcomes = run(
         &scenario,
         &mut DockurGuest::new(guest),
         &mut SystemClock::start(),
@@ -81,7 +86,35 @@ fn glazewm_tracks_virtual_monitor_count_changes() {
     )
     .unwrap();
 
-    assert_eq!(verdicts, vec![StepVerdict::Passed; 5]);
+    let observations: Vec<_> = outcomes.iter().map(|o| o.observation.clone()).collect();
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    let deviations = compare_or_record("virtual-monitor-count-changes", &observations);
+    assert_eq!(
+        (verdicts, deviations),
+        (vec![StepVerdict::Passed; 5], vec![])
+    );
+}
+
+/// Compares `observations` with baselines/`name`.json, or records that file when `VMTEST_RECORD=1`.
+fn compare_or_record(name: &str, observations: &[Option<Observation>]) -> Vec<Deviation> {
+    let path = repository().join("baselines").join(format!("{name}.json"));
+    if std::env::var("VMTEST_RECORD").as_deref() == Ok("1") {
+        let sut_commit = std::env::var("VMTEST_SUT_COMMIT")
+            .expect("VMTEST_SUT_COMMIT names the glazewm commit a baseline is recorded from");
+        let baseline = Baseline {
+            sut_commit,
+            steps: observations.to_vec(),
+        };
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, baseline_file::to_json(&baseline)).unwrap();
+        return vec![];
+    }
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+    baseline_file::from_json(&text)
+        .unwrap()
+        .deviations(observations)
+        .unwrap_or_else(|stale| panic!("{} is stale: {stale:?}", path.display()))
 }
 
 /// A startup command naming a program that is not installed, such as a status bar the user never installed.
@@ -104,7 +137,7 @@ fn glazewm_answers_ipc_after_a_startup_command_fails() {
         &glazewm_config,
     );
 
-    let verdicts = run(
+    let outcomes = run(
         &scenario,
         &mut DockurGuest::new(guest),
         &mut SystemClock::start(),
@@ -112,5 +145,6 @@ fn glazewm_answers_ipc_after_a_startup_command_fails() {
     )
     .unwrap();
 
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed]);
 }
