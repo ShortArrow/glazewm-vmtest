@@ -5,13 +5,23 @@ pub mod gate;
 pub mod window;
 
 use std::io::{BufRead, Write};
+use std::time::Duration;
 
 use vmtest_protocol::{AppCommand, AppReply, decode_line, encode_line};
 
+/// How a window is opened.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Opening {
+    /// Whether `open` returns only once the window is the foreground window.
+    pub wait_for_foreground: bool,
+    /// How long after its creation the window destroys itself, or `None` to keep it.
+    pub lifetime: Option<Duration>,
+}
+
 /// What the application does to its windows.
 pub trait WindowHost {
-    /// Opens window `id` and returns its handle once the window exists.
-    fn open(&mut self, id: u32) -> Result<i64, String>;
+    /// Opens window `id` as `how` says and returns its handle.
+    fn open(&mut self, id: u32, how: &Opening) -> Result<i64, String>;
     /// Stops window `id` from processing messages and returns once it has stopped.
     fn hang(&mut self, id: u32) -> Result<(), String>;
     /// Lets window `id` process messages again.
@@ -39,9 +49,19 @@ pub fn serve(
 
 fn carry_out(command: AppCommand, windows: &mut impl WindowHost) -> AppReply {
     let done = match command {
-        AppCommand::Open { id } => windows
-            .open(id)
-            .map(|handle| AppReply::Opened { id, handle }),
+        AppCommand::Open {
+            id,
+            wait_for_foreground,
+            lifetime_ms,
+        } => {
+            let how = Opening {
+                wait_for_foreground,
+                lifetime: lifetime_ms.map(Duration::from_millis),
+            };
+            windows
+                .open(id, &how)
+                .map(|handle| AppReply::Opened { id, handle })
+        }
         AppCommand::Hang { id } => windows.hang(id).map(|()| AppReply::Hung { id }),
         AppCommand::Resume { id } => windows.resume(id).map(|()| AppReply::Resumed { id }),
     };
@@ -60,11 +80,11 @@ mod tests {
     }
 
     impl WindowHost for FakeWindows {
-        fn open(&mut self, id: u32) -> Result<i64, String> {
+        fn open(&mut self, id: u32, how: &Opening) -> Result<i64, String> {
             if self.failing == Some(id) {
                 return Err("CreateWindowExW failed".into());
             }
-            self.done.push(format!("open {id}"));
+            self.done.push(format!("open {id} {how:?}"));
             Ok(100 + i64::from(id))
         }
         fn hang(&mut self, id: u32) -> Result<(), String> {
@@ -77,6 +97,14 @@ mod tests {
         fn resume(&mut self, id: u32) -> Result<(), String> {
             self.done.push(format!("resume {id}"));
             Ok(())
+        }
+    }
+
+    fn open(id: u32) -> AppCommand {
+        AppCommand::Open {
+            id,
+            wait_for_foreground: true,
+            lifetime_ms: None,
         }
     }
 
@@ -93,10 +121,7 @@ mod tests {
 
     #[test]
     fn answers_each_open_with_the_handle_of_the_new_window() {
-        let replies = run(
-            &[AppCommand::Open { id: 0 }, AppCommand::Open { id: 1 }],
-            &mut FakeWindows::default(),
-        );
+        let replies = run(&[open(0), open(1)], &mut FakeWindows::default());
 
         assert_eq!(
             replies,
@@ -108,12 +133,31 @@ mod tests {
     }
 
     #[test]
+    fn opens_a_window_as_told() {
+        let mut windows = FakeWindows::default();
+
+        run(
+            &[AppCommand::Open {
+                id: 3,
+                wait_for_foreground: false,
+                lifetime_ms: Some(5),
+            }],
+            &mut windows,
+        );
+
+        assert_eq!(
+            windows.done,
+            ["open 3 Opening { wait_for_foreground: false, lifetime: Some(5ms) }"]
+        );
+    }
+
+    #[test]
     fn stops_and_resumes_a_window_in_the_order_told() {
         let mut windows = FakeWindows::default();
 
         let replies = run(
             &[
-                AppCommand::Open { id: 0 },
+                open(0),
                 AppCommand::Hang { id: 0 },
                 AppCommand::Resume { id: 0 },
             ],
@@ -124,13 +168,13 @@ mod tests {
             replies[1..],
             [AppReply::Hung { id: 0 }, AppReply::Resumed { id: 0 }]
         );
-        assert_eq!(windows.done, ["open 0", "hang 0", "resume 0"]);
+        assert_eq!(windows.done[1..], ["hang 0", "resume 0"]);
     }
 
     #[test]
     fn answers_a_command_that_failed_with_its_error_and_goes_on() {
         let replies = run(
-            &[AppCommand::Open { id: 0 }, AppCommand::Open { id: 1 }],
+            &[open(0), open(1)],
             &mut FakeWindows {
                 failing: Some(0),
                 ..Default::default()

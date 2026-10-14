@@ -4,7 +4,8 @@
 use serde::{Deserialize, Serialize};
 use vmtest_domain::baseline::Baseline;
 use vmtest_domain::scenario::{
-    GlazewmIpc, ManagedWindow, MonitorLayout, Observation, TestWindow, WorkspaceLayout,
+    GlazewmIpc, ManagedWindow, MonitorLayout, Observation, TestWindow, WindowPresence,
+    WorkspaceLayout,
 };
 use vmtest_domain::topology::Rect;
 
@@ -68,6 +69,35 @@ struct TestWindowFile {
 struct WindowFile {
     test_window: Option<u32>,
     state: String,
+    presence: PresenceFile,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PresenceFile {
+    TopLevel,
+    Child,
+    Gone,
+}
+
+impl From<WindowPresence> for PresenceFile {
+    fn from(presence: WindowPresence) -> Self {
+        match presence {
+            WindowPresence::TopLevel => Self::TopLevel,
+            WindowPresence::Child => Self::Child,
+            WindowPresence::Gone => Self::Gone,
+        }
+    }
+}
+
+impl From<PresenceFile> for WindowPresence {
+    fn from(file: PresenceFile) -> Self {
+        match file {
+            PresenceFile::TopLevel => Self::TopLevel,
+            PresenceFile::Child => Self::Child,
+            PresenceFile::Gone => Self::Gone,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -200,6 +230,7 @@ impl From<&WorkspaceLayout> for WorkspaceFile {
                 .map(|window| WindowFile {
                     test_window: window.test_window,
                     state: window.state.clone(),
+                    presence: window.presence.into(),
                 })
                 .collect(),
         }
@@ -219,6 +250,7 @@ impl From<WorkspaceFile> for WorkspaceLayout {
                 .map(|window| ManagedWindow {
                     test_window: window.test_window,
                     state: window.state,
+                    presence: window.presence.into(),
                 })
                 .collect(),
         }
@@ -251,7 +283,8 @@ impl From<RectFile> for Rect {
 mod tests {
     use super::*;
     use vmtest_domain::scenario::{
-        GlazewmIpc, ManagedWindow, MonitorLayout, Observation, TestWindow, WorkspaceLayout,
+        GlazewmIpc, ManagedWindow, MonitorLayout, Observation, TestWindow, WindowPresence,
+        WorkspaceLayout,
     };
     use vmtest_domain::topology::Rect;
 
@@ -291,10 +324,12 @@ mod tests {
                         ManagedWindow {
                             test_window: Some(0),
                             state: "tiling".into(),
+                            presence: WindowPresence::TopLevel,
                         },
                         ManagedWindow {
                             test_window: None,
                             state: "floating".into(),
+                            presence: WindowPresence::Gone,
                         },
                     ],
                 }],

@@ -13,7 +13,9 @@ use vmtest_adapters::baseline_file;
 use vmtest_adapters::dockur::{DockurConfig, DockurGuest, SystemClock};
 use vmtest_adapters::glazewm::config_without_startup_commands;
 use vmtest_domain::baseline::{Baseline, Deviation};
-use vmtest_domain::scenario::{DEFAULT_IPC_LIMIT, Observation, Scenario, Step, StepVerdict};
+use vmtest_domain::scenario::{
+    DEFAULT_IPC_LIMIT, Observation, Scenario, Step, StepVerdict, TestWindowBatch, WindowLifetime,
+};
 use vmtest_runner::{SettleSettings, run};
 
 fn repository() -> PathBuf {
@@ -104,7 +106,7 @@ fn tiled_test_windows_stay_within_their_working_area_across_monitor_count_change
         name: "test windows across monitor count changes".into(),
         virtual_monitors: 1,
         steps: vec![
-            Step::OpenTestWindows(3),
+            Step::OpenTestWindows(TestWindowBatch::persistent(3)),
             Step::SetVirtualMonitorCount(3),
             Step::SetVirtualMonitorCount(1),
             Step::RemoveVirtualMonitors,
@@ -138,7 +140,7 @@ fn a_hung_test_window_does_not_stop_glazewm_managing_the_others() {
         name: "hung test window across losing every display".into(),
         virtual_monitors: 1,
         steps: vec![
-            Step::OpenTestWindows(3),
+            Step::OpenTestWindows(TestWindowBatch::persistent(3)),
             Step::HangTestWindow(1),
             Step::RemoveVirtualMonitors,
             Step::RestoreVirtualMonitors,
@@ -166,6 +168,49 @@ fn a_hung_test_window_does_not_stop_glazewm_managing_the_others() {
         (verdicts, deviations),
         (vec![StepVerdict::Passed; 6], vec![])
     );
+}
+
+/// Windows opened in a burst land in an order that depends on timing, so this scenario has no baseline
+/// and is judged by its invariants alone.
+#[test]
+#[ignore = "needs the dockur/windows guest and prebuilt binaries"]
+fn glazewm_keeps_no_short_lived_window_after_a_burst() {
+    let burst = |count, within_ms, lifetime| {
+        Step::OpenTestWindows(TestWindowBatch {
+            count,
+            within: Some(Duration::from_millis(within_ms)),
+            lifetime,
+        })
+    };
+    let scenario = Scenario {
+        name: "bursts of short-lived and persistent test windows".into(),
+        virtual_monitors: 1,
+        steps: vec![
+            Step::OpenTestWindows(TestWindowBatch::persistent(2)),
+            burst(20, 500, WindowLifetime::DestroyedAfter(Duration::ZERO)),
+            burst(
+                10,
+                200,
+                WindowLifetime::DestroyedAfter(Duration::from_millis(30)),
+            ),
+            burst(5, 100, WindowLifetime::Persistent),
+            Step::RemoveVirtualMonitors,
+            Step::RestoreVirtualMonitors,
+        ],
+        ipc_limit: DEFAULT_IPC_LIMIT,
+    };
+    let guest = config("glazewm-config.yaml", &quiet_glazewm_config());
+
+    let outcomes = run(
+        &scenario,
+        &mut DockurGuest::new(guest),
+        &mut SystemClock::start(),
+        SETTLE,
+    )
+    .unwrap();
+
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    assert_eq!(verdicts, vec![StepVerdict::Passed; 7]);
 }
 
 fn compare_or_record(name: &str, observations: &[Option<Observation>]) -> Vec<Deviation> {

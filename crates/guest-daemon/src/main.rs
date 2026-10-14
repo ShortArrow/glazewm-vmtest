@@ -13,12 +13,13 @@ fn main() -> std::io::Result<()> {
     use std::net::TcpListener;
     use std::sync::Arc;
     use vmtest_guest_daemon::process::ProcessGlazewmCli;
+    use vmtest_guest_daemon::test_windows::Batch;
     use vmtest_guest_daemon::test_windows::LaunchedApp;
     use vmtest_guest_daemon::win32::{self, Win32Topology};
     use vmtest_guest_daemon::{
         CliOutcome, GlazewmCli, SutProcesses, TestWindowHost, TopologySource, serve,
     };
-    use vmtest_protocol::{DisplayDto, SutProgram, TestWindowDto};
+    use vmtest_protocol::{DisplayDto, PresenceDto, SutProgram, TestWindowDto};
 
     struct LiveGuest {
         cli: ProcessGlazewmCli,
@@ -27,8 +28,15 @@ fn main() -> std::io::Result<()> {
     }
 
     impl TestWindowHost for LiveGuest {
-        fn open(&self, count: u32) -> Result<Vec<u32>, String> {
-            self.test_windows.open(count)
+        fn open(&self, batch: &Batch) -> Result<Vec<u32>, String> {
+            self.test_windows.open(batch)
+        }
+
+        fn presence(&self, handles: &[i64]) -> Vec<PresenceDto> {
+            handles
+                .iter()
+                .map(|&handle| win32::window_presence(handle))
+                .collect()
         }
 
         fn windows(&self) -> Result<Vec<TestWindowDto>, String> {

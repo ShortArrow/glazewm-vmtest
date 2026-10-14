@@ -14,12 +14,40 @@ pub enum Step {
     RemoveVirtualMonitors,
     /// Brings back the virtual monitors removed by `RemoveVirtualMonitors`.
     RestoreVirtualMonitors,
-    /// Opens this many more test windows, one after another.
-    OpenTestWindows(u32),
+    OpenTestWindows(TestWindowBatch),
     /// Stops the message processing of the test window with this id.
     HangTestWindow(u32),
     /// Lets the test window with this id process messages again.
     ResumeTestWindow(u32),
+}
+
+/// Test windows opened by one step.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TestWindowBatch {
+    pub count: u32,
+    /// `None` opens each window once the one before is the foreground window, so that every run places
+    /// them alike; a span opens them at even intervals within it, without waiting for anything.
+    pub within: Option<Duration>,
+    pub lifetime: WindowLifetime,
+}
+
+impl TestWindowBatch {
+    /// `count` persistent windows, each opened once the one before is the foreground window.
+    pub fn persistent(count: u32) -> Self {
+        Self {
+            count,
+            within: None,
+            lifetime: WindowLifetime::Persistent,
+        }
+    }
+}
+
+/// How long a test window exists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowLifetime {
+    Persistent,
+    /// Destroyed by its own thread this long after it was created.
+    DestroyedAfter(Duration),
 }
 
 /// Given an initial number of virtual monitors, when the steps run in order.
@@ -56,6 +84,17 @@ pub struct ManagedWindow {
     pub test_window: Option<u32>,
     /// glazewm's window state: `tiling`, `floating`, `minimized` or `fullscreen`.
     pub state: String,
+    /// What the OS says of the window glazewm reports.
+    pub presence: WindowPresence,
+}
+
+/// Whether a window exists, as the OS reports it, and whether it is a top-level window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowPresence {
+    TopLevel,
+    /// It exists but has a parent window.
+    Child,
+    Gone,
 }
 
 /// A window the harness opened, identified by the number the guest daemon gave it.

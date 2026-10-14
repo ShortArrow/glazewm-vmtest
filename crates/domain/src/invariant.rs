@@ -1,6 +1,6 @@
 //! Conditions that must hold on a settled guest whatever the SUT is meant to do.
 
-use crate::scenario::{GlazewmIpc, MonitorLayout, TestWindow};
+use crate::scenario::{GlazewmIpc, MonitorLayout, TestWindow, WindowPresence};
 
 /// A violated invariant, with what was expected and what was observed.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,6 +65,45 @@ pub fn tiled_windows_within_working_area(
     })
 }
 
+/// Checks that every window glazewm manages, on any workspace, still exists and is a top-level window.
+pub fn manages_only_existing_top_level_windows(
+    monitors: &[MonitorLayout],
+) -> Result<(), Violation> {
+    let observed: Vec<String> = monitors
+        .iter()
+        .flat_map(|monitor| &monitor.workspaces)
+        .flat_map(|workspace| {
+            workspace
+                .windows
+                .iter()
+                .map(move |window| (workspace, window))
+        })
+        .filter_map(|(workspace, window)| {
+            let presence = match window.presence {
+                WindowPresence::TopLevel => return None,
+                WindowPresence::Child => "a child",
+                WindowPresence::Gone => "gone",
+            };
+            let which = match window.test_window {
+                Some(id) => format!("test window {id}"),
+                None => "a window the harness did not open".into(),
+            };
+            Some(format!(
+                "{which}, on workspace {}: {presence}",
+                workspace.name
+            ))
+        })
+        .collect();
+    if observed.is_empty() {
+        return Ok(());
+    }
+    Err(Violation {
+        invariant: "manages_only_existing_top_level_windows",
+        expected: "only existing top-level windows managed".into(),
+        observed: observed.join("; "),
+    })
+}
+
 /// Checks that a glazewm process was running when the guest was observed.
 pub fn glazewm_is_running(answer: &GlazewmIpc) -> Result<(), Violation> {
     match answer {
@@ -95,7 +134,9 @@ pub fn glazewm_answers_ipc(answer: &GlazewmIpc) -> Result<(), Violation> {
 mod tests {
     use super::*;
 
-    use crate::scenario::{ManagedWindow, MonitorLayout, TestWindow, WorkspaceLayout};
+    use crate::scenario::{
+        ManagedWindow, MonitorLayout, TestWindow, WindowPresence, WorkspaceLayout,
+    };
     use crate::topology::Rect;
 
     const WORKING_AREA: Rect = Rect {
@@ -123,6 +164,7 @@ mod tests {
         ManagedWindow {
             test_window: Some(id),
             state: state.into(),
+            presence: WindowPresence::TopLevel,
         }
     }
 
@@ -216,6 +258,7 @@ mod tests {
                 ManagedWindow {
                     test_window: None,
                     state: "tiling".into(),
+                    presence: WindowPresence::TopLevel,
                 },
                 managed(3, "tiling"),
             ],
@@ -230,6 +273,42 @@ mod tests {
         assert_eq!(
             tiled_windows_within_working_area(&monitors, &[gone]),
             Ok(())
+        );
+    }
+
+    #[test]
+    fn holds_while_glazewm_manages_only_existing_top_level_windows() {
+        let monitors = [
+            monitor_showing(vec![managed(0, "tiling")], true),
+            monitor_showing(vec![managed(1, "floating")], false),
+        ];
+
+        assert_eq!(manages_only_existing_top_level_windows(&monitors), Ok(()));
+    }
+
+    #[test]
+    fn is_violated_by_every_managed_window_that_is_gone_or_a_child() {
+        let gone = ManagedWindow {
+            presence: WindowPresence::Gone,
+            ..managed(1, "tiling")
+        };
+        let child = ManagedWindow {
+            test_window: None,
+            state: "floating".into(),
+            presence: WindowPresence::Child,
+        };
+        let monitors = [
+            monitor_showing(vec![managed(0, "tiling"), gone], true),
+            monitor_showing(vec![child], false),
+        ];
+
+        assert_eq!(
+            manages_only_existing_top_level_windows(&monitors),
+            Err(Violation {
+                invariant: "manages_only_existing_top_level_windows",
+                expected: "only existing top-level windows managed".into(),
+                observed: "test window 1, on workspace 1: gone; a window the harness did not open, on workspace 1: a child".into(),
+            })
         );
     }
 

@@ -24,6 +24,8 @@ After step 3 the guest OS reports the same four displays in every run, and glaze
 
 No invariant was violated in any run; the difference shows only as a baseline deviation.
 
+The scenario `glazewm_tracks_virtual_monitor_count_changes`, which opens no windows, varies at the same step in another way. In about ten runs, glazewm put the focus on the platform's display after setting the virtual monitor count to 3, except in one run, in which the first virtual monitor and its workspace had the focus. Workspaces were placed the same in every run.
+
 ## Open
 
 - Whether the virtual display driver presents `SETDISPLAYCOUNT` as one addition or as removing and re-adding every virtual monitor, and whether that sequence itself varies between runs.

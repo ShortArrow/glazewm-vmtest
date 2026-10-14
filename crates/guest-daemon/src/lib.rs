@@ -10,8 +10,10 @@ use std::io::{BufRead, Write};
 use std::time::Duration;
 
 use vmtest_protocol::{
-    DisplayDto, Request, Response, SutProgram, TestWindowDto, decode_line, encode_line,
+    DisplayDto, PresenceDto, Request, Response, SutProgram, TestWindowDto, decode_line, encode_line,
 };
+
+use crate::test_windows::Batch;
 
 /// Reads the displays the guest OS currently reports.
 pub trait TopologySource {
@@ -49,8 +51,10 @@ pub trait SutProcesses {
 
 /// Opens test windows through a test-window application and reads where they are.
 pub trait TestWindowHost {
-    /// Opens `count` more test windows and returns their ids once each exists.
-    fn open(&self, count: u32) -> Result<Vec<u32>, String>;
+    /// Opens the test windows of `batch` and returns their ids once each has been created.
+    fn open(&self, batch: &Batch) -> Result<Vec<u32>, String>;
+    /// What the OS says of each window handle, in the same order.
+    fn presence(&self, handles: &[i64]) -> Vec<PresenceDto>;
     /// Every test window opened so far, in the order of opening, with its frame as the OS reports it now.
     fn windows(&self) -> Result<Vec<TestWindowDto>, String>;
     /// Stops test window `id` from processing messages and returns once it has stopped.
@@ -88,9 +92,20 @@ pub fn handle(request: Request, guest: &dyn Guest) -> Response {
             Ok(running) => Response::Running { running },
             Err(message) => Response::Error { message },
         },
-        Request::OpenTestWindows { count } => match guest.open(count) {
+        Request::OpenTestWindows {
+            count,
+            within_ms,
+            lifetime_ms,
+        } => match guest.open(&Batch {
+            count,
+            within: within_ms.map(Duration::from_millis),
+            lifetime_ms,
+        }) {
             Ok(ids) => Response::TestWindowsOpened { ids },
             Err(message) => Response::Error { message },
+        },
+        Request::WindowPresence { handles } => Response::WindowPresence {
+            presences: guest.presence(&handles),
         },
         Request::TestWindows => match guest.windows() {
             Ok(windows) => Response::TestWindows { windows },
@@ -131,7 +146,8 @@ pub fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmtest_protocol::{GlazewmQuery, RectDto, SutProgram, TestWindowDto};
+    use crate::test_windows::Batch;
+    use vmtest_protocol::{GlazewmQuery, PresenceDto, RectDto, SutProgram, TestWindowDto};
 
     /// A guest whose test-window host answers from fixed results, and whose other parts are unused.
     struct FixedWindows {
@@ -158,9 +174,21 @@ mod tests {
     }
 
     impl TestWindowHost for FixedWindows {
-        fn open(&self, count: u32) -> Result<Vec<u32>, String> {
-            assert_eq!(count, 2);
+        fn open(&self, batch: &Batch) -> Result<Vec<u32>, String> {
+            assert_eq!(batch, &Batch::one_by_one(2));
             self.opened.clone()
+        }
+        fn presence(&self, handles: &[i64]) -> Vec<PresenceDto> {
+            handles
+                .iter()
+                .map(|&handle| {
+                    if handle == 10 {
+                        PresenceDto::TopLevel
+                    } else {
+                        PresenceDto::Gone
+                    }
+                })
+                .collect()
         }
         fn windows(&self) -> Result<Vec<TestWindowDto>, String> {
             Ok(self.windows.clone())
@@ -176,6 +204,26 @@ mod tests {
     }
 
     #[test]
+    fn answers_what_the_os_says_of_each_window_handle() {
+        let guest = FixedWindows {
+            opened: Ok(vec![]),
+            windows: vec![],
+        };
+
+        assert_eq!(
+            handle(
+                Request::WindowPresence {
+                    handles: vec![10, 11]
+                },
+                &guest
+            ),
+            Response::WindowPresence {
+                presences: vec![PresenceDto::TopLevel, PresenceDto::Gone]
+            }
+        );
+    }
+
+    #[test]
     fn answers_with_the_ids_of_the_test_windows_it_opened() {
         let guest = FixedWindows {
             opened: Ok(vec![0, 1]),
@@ -183,7 +231,14 @@ mod tests {
         };
 
         assert_eq!(
-            handle(Request::OpenTestWindows { count: 2 }, &guest),
+            handle(
+                Request::OpenTestWindows {
+                    count: 2,
+                    within_ms: None,
+                    lifetime_ms: None
+                },
+                &guest
+            ),
             Response::TestWindowsOpened { ids: vec![0, 1] }
         );
     }
@@ -196,7 +251,14 @@ mod tests {
         };
 
         assert_eq!(
-            handle(Request::OpenTestWindows { count: 2 }, &guest),
+            handle(
+                Request::OpenTestWindows {
+                    count: 2,
+                    within_ms: None,
+                    lifetime_ms: None
+                },
+                &guest
+            ),
             Response::Error {
                 message: "the test-window application closed its connection".into()
             }
@@ -259,8 +321,11 @@ mod tests {
     }
 
     impl TestWindowHost for FixedProcesses {
-        fn open(&self, _count: u32) -> Result<Vec<u32>, String> {
+        fn open(&self, _batch: &Batch) -> Result<Vec<u32>, String> {
             Err("no test windows in this fake".into())
+        }
+        fn presence(&self, handles: &[i64]) -> Vec<PresenceDto> {
+            vec![PresenceDto::Gone; handles.len()]
         }
         fn windows(&self) -> Result<Vec<TestWindowDto>, String> {
             Err("no test windows in this fake".into())
@@ -321,8 +386,11 @@ mod tests {
     }
 
     impl TestWindowHost for FixedTopology {
-        fn open(&self, _count: u32) -> Result<Vec<u32>, String> {
+        fn open(&self, _batch: &Batch) -> Result<Vec<u32>, String> {
             Err("no test windows in this fake".into())
+        }
+        fn presence(&self, handles: &[i64]) -> Vec<PresenceDto> {
+            vec![PresenceDto::Gone; handles.len()]
         }
         fn windows(&self) -> Result<Vec<TestWindowDto>, String> {
             Err("no test windows in this fake".into())
@@ -371,8 +439,11 @@ mod tests {
     }
 
     impl TestWindowHost for FakeCli {
-        fn open(&self, _count: u32) -> Result<Vec<u32>, String> {
+        fn open(&self, _batch: &Batch) -> Result<Vec<u32>, String> {
             Err("no test windows in this fake".into())
+        }
+        fn presence(&self, handles: &[i64]) -> Vec<PresenceDto> {
+            vec![PresenceDto::Gone; handles.len()]
         }
         fn windows(&self) -> Result<Vec<TestWindowDto>, String> {
             Err("no test windows in this fake".into())

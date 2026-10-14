@@ -21,9 +21,19 @@ pub enum Request {
     SutRunning {
         program: SutProgram,
     },
-    /// Opens `count` more test windows and answers once each exists.
+    /// Opens `count` more test windows and answers once each has been created.
+    ///
+    /// Without `within_ms`, each is opened once the one before is the foreground window; with it, they are
+    /// opened at even intervals within that many milliseconds. Without `lifetime_ms` they persist; with it,
+    /// each is destroyed that many milliseconds after its creation.
     OpenTestWindows {
         count: u32,
+        within_ms: Option<u64>,
+        lifetime_ms: Option<u64>,
+    },
+    /// Asks what the OS says of each window handle, in the same order.
+    WindowPresence {
+        handles: Vec<i64>,
     },
     /// Asks for every test window opened so far, with its frame as the OS reports it.
     TestWindows,
@@ -87,6 +97,9 @@ pub enum Response {
     TestWindows {
         windows: Vec<TestWindowDto>,
     },
+    WindowPresence {
+        presences: Vec<PresenceDto>,
+    },
     TestWindowHung {
         id: u32,
     },
@@ -129,6 +142,15 @@ pub struct TestWindowDto {
     pub hung: bool,
 }
 
+/// Whether a window exists, and whether it is a top-level window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresenceDto {
+    TopLevel,
+    Child,
+    Gone,
+}
+
 /// What the guest daemon tells a test-window application to do.
 ///
 /// Every test-window application, whatever its UI framework, connects to the address given as its only
@@ -137,7 +159,13 @@ pub struct TestWindowDto {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AppCommand {
     /// Opens a normal top-level window, persistent and responsive, identified by `id`.
-    Open { id: u32 },
+    /// Opens window `id`, answering once it is created, or once it is the foreground window when
+    /// `wait_for_foreground` is set; with `lifetime_ms`, the window destroys itself that long after creation.
+    Open {
+        id: u32,
+        wait_for_foreground: bool,
+        lifetime_ms: Option<u64>,
+    },
     /// Stops window `id`'s thread from processing messages until `Resume`.
     Hang { id: u32 },
     /// Lets window `id`'s thread process messages again.
@@ -268,11 +296,18 @@ mod tests {
     }
 
     #[test]
-    fn asks_for_a_number_of_test_windows() {
+    fn asks_for_test_windows_by_count_span_and_lifetime() {
+        let request = Request::OpenTestWindows {
+            count: 3,
+            within_ms: Some(200),
+            lifetime_ms: None,
+        };
+
         assert_eq!(
-            encode_line(&Request::OpenTestWindows { count: 3 }),
-            "{\"type\":\"open_test_windows\",\"count\":3}
-"
+            encode_line(&request),
+            r#"{"type":"open_test_windows","count":3,"within_ms":200,"lifetime_ms":null}"#
+                .to_owned()
+                + "\n"
         );
     }
 
@@ -333,11 +368,35 @@ mod tests {
     }
 
     #[test]
-    fn tells_a_test_window_application_to_open_a_window_by_id() {
+    fn tells_a_test_window_application_how_to_open_a_window() {
+        let command = AppCommand::Open {
+            id: 4,
+            wait_for_foreground: false,
+            lifetime_ms: Some(0),
+        };
+
         assert_eq!(
-            encode_line(&AppCommand::Open { id: 4 }),
-            "{\"type\":\"open\",\"id\":4}
-"
+            encode_line(&command),
+            r#"{"type":"open","id":4,"wait_for_foreground":false,"lifetime_ms":0}"#.to_owned()
+                + "\n"
+        );
+    }
+
+    #[test]
+    fn asks_what_the_os_says_of_window_handles() {
+        assert_eq!(
+            encode_line(&Request::WindowPresence {
+                handles: vec![10, 11]
+            }),
+            r#"{"type":"window_presence","handles":[10,11]}"#.to_owned() + "\n"
+        );
+        let response = Response::WindowPresence {
+            presences: vec![PresenceDto::TopLevel, PresenceDto::Child, PresenceDto::Gone],
+        };
+        assert_eq!(
+            encode_line(&response),
+            r#"{"type":"window_presence","presences":["top_level","child","gone"]}"#.to_owned()
+                + "\n"
         );
     }
 

@@ -3,35 +3,63 @@
 //! The JSON is read without glazewm's own types, so that SUT commits with a different IPC schema can still be observed.
 
 use serde_json::Value;
-use vmtest_domain::scenario::{GlazewmIpc, ManagedWindow, MonitorLayout, WorkspaceLayout};
+use vmtest_domain::scenario::{
+    GlazewmIpc, ManagedWindow, MonitorLayout, WindowPresence, WorkspaceLayout,
+};
 use vmtest_domain::topology::Rect;
 use vmtest_protocol::Response;
 
+/// What the harness knows of a window glazewm reports, found by its handle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WindowIdentity {
+    pub test_window: Option<u32>,
+    pub presence: WindowPresence,
+}
+
 /// Reads the guest daemon's answer to a `query monitors` as what glazewm answered.
 ///
-/// `test_windows` holds the id and handle of each test window, so that the windows glazewm manages can be
-/// told apart by id. A daemon-side error says nothing about glazewm, so it is an error of the harness, not `NoAnswer`.
+/// `identify` tells, for each window handle glazewm reports, which test window it is and what the OS says
+/// of it. A daemon-side error says nothing about glazewm, so it is an error of the harness, not `NoAnswer`.
 pub fn monitors_answer(
     response: Response,
-    test_windows: &[(u32, i64)],
+    identify: &dyn Fn(i64) -> WindowIdentity,
 ) -> Result<GlazewmIpc, String> {
     match response {
         Response::Output { stdout, .. } => {
-            monitor_layouts(&stdout, test_windows).map(GlazewmIpc::Answered)
+            monitor_layouts(&stdout, identify).map(GlazewmIpc::Answered)
         }
         Response::TimedOut { .. } => Ok(GlazewmIpc::NoAnswer),
         other => Err(format!("unexpected answer to a glazewm query: {other:?}")),
     }
 }
 
+/// The handle of every window in the output of `glazewm-cli query monitors`, or none if it cannot be read.
+pub fn window_handles(stdout: &str) -> Vec<i64> {
+    fn collect(container: &Value, handles: &mut Vec<i64>) {
+        if container["type"] == "window" {
+            handles.extend(container["handle"].as_i64());
+        }
+        for child in container["children"].as_array().into_iter().flatten() {
+            collect(child, handles);
+        }
+    }
+    let mut handles = Vec::new();
+    if let Ok(answer) = serde_json::from_str::<Value>(stdout.trim()) {
+        for monitor in answer["data"]["monitors"].as_array().into_iter().flatten() {
+            collect(monitor, &mut handles);
+        }
+    }
+    handles
+}
+
 /// Reads the monitors, the workspaces on each and the windows on those, from the output of
 /// `glazewm-cli query monitors`.
 ///
 /// Identifiers that change between runs (container ids, handles, device names) are not kept; a window's
-/// handle only picks its id out of `test_windows`, pairs of id and handle.
+/// handle only serves `identify`.
 pub fn monitor_layouts(
     stdout: &str,
-    test_windows: &[(u32, i64)],
+    identify: &dyn Fn(i64) -> WindowIdentity,
 ) -> Result<Vec<MonitorLayout>, String> {
     let answer: Value = serde_json::from_str(stdout.trim())
         .map_err(|error| format!("glazewm-cli printed something other than JSON: {error}"))?;
@@ -43,11 +71,14 @@ pub fn monitor_layouts(
         .as_array()
         .ok_or("glazewm's answer has no data.monitors array")?
         .iter()
-        .map(|monitor| monitor_layout(monitor, test_windows))
+        .map(|monitor| monitor_layout(monitor, identify))
         .collect()
 }
 
-fn monitor_layout(monitor: &Value, test_windows: &[(u32, i64)]) -> Result<MonitorLayout, String> {
+fn monitor_layout(
+    monitor: &Value,
+    identify: &dyn Fn(i64) -> WindowIdentity,
+) -> Result<MonitorLayout, String> {
     let working = &monitor["workingRect"];
     let left = int(working, "left")?;
     let top = int(working, "top")?;
@@ -71,17 +102,17 @@ fn monitor_layout(monitor: &Value, test_windows: &[(u32, i64)]) -> Result<Monito
             .ok_or("a monitor in glazewm's answer has no children array")?
             .iter()
             .filter(|child| child["type"] == "workspace")
-            .map(|workspace| workspace_layout(workspace, test_windows))
+            .map(|workspace| workspace_layout(workspace, identify))
             .collect::<Result<_, _>>()?,
     })
 }
 
 fn workspace_layout(
     workspace: &Value,
-    test_windows: &[(u32, i64)],
+    identify: &dyn Fn(i64) -> WindowIdentity,
 ) -> Result<WorkspaceLayout, String> {
     let mut windows = Vec::new();
-    collect_windows(workspace, test_windows, &mut windows)?;
+    collect_windows(workspace, identify, &mut windows)?;
     Ok(WorkspaceLayout {
         name: text(workspace, "name")?,
         is_displayed: boolean(workspace, "isDisplayed")?,
@@ -94,7 +125,7 @@ fn workspace_layout(
 /// Appends the windows among `container`'s descendants in depth-first order, the order glazewm lays them out.
 fn collect_windows(
     container: &Value,
-    test_windows: &[(u32, i64)],
+    identify: &dyn Fn(i64) -> WindowIdentity,
     windows: &mut Vec<ManagedWindow>,
 ) -> Result<(), String> {
     let children = container["children"]
@@ -106,15 +137,14 @@ fn collect_windows(
                 let handle = child["handle"]
                     .as_i64()
                     .ok_or("a window in glazewm's answer has no integer handle")?;
+                let identity = identify(handle);
                 windows.push(ManagedWindow {
-                    test_window: test_windows
-                        .iter()
-                        .find(|(_, test_handle)| *test_handle == handle)
-                        .map(|(id, _)| *id),
+                    test_window: identity.test_window,
                     state: text(&child["state"], "type")?,
+                    presence: identity.presence,
                 });
             }
-            Some("split") => collect_windows(child, test_windows, windows)?,
+            Some("split") => collect_windows(child, identify, windows)?,
             _ => {}
         }
     }
@@ -164,13 +194,13 @@ pub fn config_without_startup_commands(sample: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmtest_domain::scenario::WorkspaceLayout;
+    use vmtest_domain::scenario::{WindowPresence, WorkspaceLayout};
     use vmtest_domain::topology::Rect;
 
     #[test]
     fn a_timed_out_monitors_query_is_no_answer() {
         assert_eq!(
-            monitors_answer(Response::TimedOut { limit_ms: 2000 }, &[]),
+            monitors_answer(Response::TimedOut { limit_ms: 2000 }, &unknown),
             Ok(GlazewmIpc::NoAnswer)
         );
     }
@@ -181,7 +211,7 @@ mod tests {
             message: "glazewm-cli.exe not found".into(),
         };
 
-        assert!(monitors_answer(response, &[]).is_err());
+        assert!(monitors_answer(response, &unknown).is_err());
     }
 
     #[test]
@@ -214,6 +244,13 @@ mod tests {
            {"type":"workspace","id":"b2","name":"2","isDisplayed":false,"hasFocus":false,"tilingDirection":"vertical","children":[]}
          ]}
     ]},"error":null,"success":true}"#;
+
+    fn unknown(_handle: i64) -> WindowIdentity {
+        WindowIdentity {
+            test_window: None,
+            presence: WindowPresence::TopLevel,
+        }
+    }
 
     fn one_monitor() -> MonitorLayout {
         MonitorLayout {
@@ -262,26 +299,45 @@ mod tests {
             ]"#,
         );
 
-        let monitors = monitor_layouts(&stdout, &[(4, 300)]).unwrap();
+        let identify = |handle| match handle {
+            300 => WindowIdentity {
+                test_window: Some(4),
+                presence: WindowPresence::Gone,
+            },
+            _ => unknown(handle),
+        };
 
+        let monitors = monitor_layouts(&stdout, &identify).unwrap();
+
+        assert_eq!(window_handles(&stdout), [200, 300]);
         assert_eq!(
             monitors[0].workspaces[0].windows,
             [
                 ManagedWindow {
                     test_window: None,
-                    state: "tiling".into()
+                    state: "tiling".into(),
+                    presence: WindowPresence::TopLevel,
                 },
                 ManagedWindow {
                     test_window: Some(4),
-                    state: "floating".into()
+                    state: "floating".into(),
+                    presence: WindowPresence::Gone,
                 }
             ]
         );
     }
 
     #[test]
+    fn finds_no_window_handles_in_output_it_cannot_read() {
+        assert!(window_handles("not json").is_empty());
+    }
+
+    #[test]
     fn reads_each_monitor_with_its_workspaces_in_glazewm_order() {
-        assert_eq!(monitor_layouts(ONE_MONITOR, &[]), Ok(vec![one_monitor()]));
+        assert_eq!(
+            monitor_layouts(ONE_MONITOR, &unknown),
+            Ok(vec![one_monitor()])
+        );
     }
 
     #[test]
@@ -293,7 +349,7 @@ mod tests {
         };
 
         assert_eq!(
-            monitors_answer(response, &[]),
+            monitors_answer(response, &unknown),
             Ok(GlazewmIpc::Answered(vec![one_monitor()]))
         );
     }
@@ -302,7 +358,7 @@ mod tests {
     fn ignores_fields_it_does_not_know() {
         let stdout = ONE_MONITOR.replace(r#""dpi":144"#, r#""dpi":144,"newField":[1]"#);
 
-        assert_eq!(monitor_layouts(&stdout, &[]), Ok(vec![one_monitor()]));
+        assert_eq!(monitor_layouts(&stdout, &unknown), Ok(vec![one_monitor()]));
     }
 
     #[test]
@@ -310,7 +366,7 @@ mod tests {
         let stdout = r#"{"clientMessage":"query monitors","data":null,"error":"WM is not running","success":false}"#;
 
         assert_eq!(
-            monitor_layouts(stdout, &[]),
+            monitor_layouts(stdout, &unknown),
             Err("glazewm answered with an error: WM is not running".into())
         );
     }
@@ -319,6 +375,6 @@ mod tests {
     fn a_monitor_without_its_bounds_is_an_error() {
         let stdout = ONE_MONITOR.replace(r#""x":1280,"#, "");
 
-        assert!(monitor_layouts(&stdout, &[]).is_err());
+        assert!(monitor_layouts(&stdout, &unknown).is_err());
     }
 }

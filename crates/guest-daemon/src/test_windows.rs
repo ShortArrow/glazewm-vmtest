@@ -9,6 +9,28 @@ use std::time::{Duration, Instant};
 
 use vmtest_protocol::{AppCommand, AppReply, decode_line, encode_line};
 
+/// Test windows to open in one request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Batch {
+    pub count: u32,
+    /// `None` opens each once the one before is the foreground window; a span opens them at even
+    /// intervals within it.
+    pub within: Option<Duration>,
+    /// `None` keeps them; a number has each destroyed that many milliseconds after its creation.
+    pub lifetime_ms: Option<u64>,
+}
+
+impl Batch {
+    /// `count` persistent windows, each opened once the one before is the foreground window.
+    pub fn one_by_one(count: u32) -> Self {
+        Self {
+            count,
+            within: None,
+            lifetime_ms: None,
+        }
+    }
+}
+
 /// A window a test-window application has opened.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenedWindow {
@@ -35,17 +57,23 @@ impl<R: BufRead, W: Write> TestWindowApp<R, W> {
         }
     }
 
-    /// Opens `count` more windows, one at a time, and returns their ids.
+    /// Opens the windows of `batch` and returns their ids.
     ///
     /// Ids continue from the windows opened before, so that a window keeps its id for the whole run.
-    pub fn open(&mut self, count: u32) -> Result<Vec<u32>, String> {
+    pub fn open(&mut self, batch: &Batch) -> Result<Vec<u32>, String> {
+        let count = batch.count;
         let first = u32::try_from(self.opened.len()).map_err(|_| "too many test windows")?;
         let end = first
             .checked_add(count)
             .ok_or_else(|| format!("{count} more test windows would exhaust the ids"))?;
+        let start = Instant::now();
         (first..end)
             .map(|id| {
-                let handle = self.open_one(id)?;
+                if let Some(span) = batch.within {
+                    let due = start + span * (id - first) / count;
+                    std::thread::sleep(due.saturating_duration_since(Instant::now()));
+                }
+                let handle = self.open_one(id, batch)?;
                 self.opened.push(OpenedWindow {
                     id,
                     handle,
@@ -99,8 +127,13 @@ impl<R: BufRead, W: Write> TestWindowApp<R, W> {
         }
     }
 
-    fn open_one(&mut self, id: u32) -> Result<i64, String> {
-        match self.command(&AppCommand::Open { id })? {
+    fn open_one(&mut self, id: u32, batch: &Batch) -> Result<i64, String> {
+        let command = AppCommand::Open {
+            id,
+            wait_for_foreground: batch.within.is_none(),
+            lifetime_ms: batch.lifetime_ms,
+        };
+        match self.command(&command)? {
             AppReply::Opened { id: opened, handle } if opened == id => Ok(handle),
             AppReply::Error { message } => Err(format!(
                 "the test-window application could not open window {id}: {message}"
@@ -148,14 +181,14 @@ impl LaunchedApp {
         }
     }
 
-    /// Opens `count` more windows, starting the application first if it is not running.
-    pub fn open(&self, count: u32) -> Result<Vec<u32>, String> {
+    /// Opens the windows of `batch`, starting the application first if it is not running.
+    pub fn open(&self, batch: &Batch) -> Result<Vec<u32>, String> {
         let mut app = self.app.lock().map_err(|_| "a previous request panicked")?;
         let app = match app.as_mut() {
             Some(app) => app,
             None => app.insert(self.start()?),
         };
-        app.open(count)
+        app.open(batch)
     }
 
     /// Every window opened so far.
@@ -224,6 +257,14 @@ mod tests {
         std::io::Cursor::new(text.into_bytes())
     }
 
+    fn open_command(id: u32) -> AppCommand {
+        AppCommand::Open {
+            id,
+            wait_for_foreground: true,
+            lifetime_ms: None,
+        }
+    }
+
     fn commands(written: &[u8]) -> Vec<AppCommand> {
         String::from_utf8(written.to_vec())
             .unwrap()
@@ -243,15 +284,11 @@ mod tests {
             Vec::new(),
         );
 
-        assert_eq!(app.open(2), Ok(vec![0, 1]));
-        assert_eq!(app.open(1), Ok(vec![2]));
+        assert_eq!(app.open(&Batch::one_by_one(2)), Ok(vec![0, 1]));
+        assert_eq!(app.open(&Batch::one_by_one(1)), Ok(vec![2]));
         assert_eq!(
             commands(app.writer()),
-            [
-                AppCommand::Open { id: 0 },
-                AppCommand::Open { id: 1 },
-                AppCommand::Open { id: 2 }
-            ]
+            [open_command(0), open_command(1), open_command(2)]
         );
         let handles: Vec<_> = app.windows().iter().map(|w| (w.id, w.handle)).collect();
         assert_eq!(handles, [(0, 10), (1, 11), (2, 12)]);
@@ -266,7 +303,7 @@ mod tests {
         ];
         all.extend_from_slice(replies_after_opening);
         let mut app = TestWindowApp::new(replies(&all), Vec::new());
-        app.open(2).unwrap();
+        app.open(&Batch::one_by_one(2)).unwrap();
         app
     }
 
@@ -313,6 +350,31 @@ mod tests {
     }
 
     #[test]
+    fn opens_a_batch_within_a_span_without_waiting_for_the_foreground() {
+        let mut app = TestWindowApp::new(
+            replies(&[
+                AppReply::Opened { id: 0, handle: 10 },
+                AppReply::Opened { id: 1, handle: 11 },
+            ]),
+            Vec::new(),
+        );
+        let batch = Batch {
+            count: 2,
+            within: Some(Duration::ZERO),
+            lifetime_ms: Some(5),
+        };
+
+        app.open(&batch).unwrap();
+
+        let short_lived = |id| AppCommand::Open {
+            id,
+            wait_for_foreground: false,
+            lifetime_ms: Some(5),
+        };
+        assert_eq!(commands(app.writer()), [short_lived(0), short_lived(1)]);
+    }
+
+    #[test]
     fn passes_on_the_error_the_application_reports() {
         let mut app = TestWindowApp::new(
             replies(&[AppReply::Error {
@@ -322,7 +384,7 @@ mod tests {
         );
 
         assert_eq!(
-            app.open(1),
+            app.open(&Batch::one_by_one(1)),
             Err(
                 "the test-window application could not open window 0: CreateWindowExW failed"
                     .into()
@@ -337,7 +399,7 @@ mod tests {
             Vec::new(),
         );
 
-        assert!(app.open(1).is_err());
+        assert!(app.open(&Batch::one_by_one(1)).is_err());
         assert!(app.windows().is_empty());
     }
 
@@ -345,7 +407,7 @@ mod tests {
     fn reports_an_application_that_cannot_be_started() {
         let host = LaunchedApp::new("vmtest-no-such-application.exe".into());
 
-        let error = host.open(1).unwrap_err();
+        let error = host.open(&Batch::one_by_one(1)).unwrap_err();
 
         assert!(
             error.starts_with("cannot start the test-window application"),
@@ -359,16 +421,16 @@ mod tests {
             replies(&[AppReply::Opened { id: 0, handle: 10 }]),
             Vec::new(),
         );
-        app.open(1).unwrap();
+        app.open(&Batch::one_by_one(1)).unwrap();
 
-        assert!(app.open(u32::MAX).is_err());
-        assert_eq!(commands(app.writer()), [AppCommand::Open { id: 0 }]);
+        assert!(app.open(&Batch::one_by_one(u32::MAX)).is_err());
+        assert_eq!(commands(app.writer()), [open_command(0)]);
     }
 
     #[test]
     fn reports_a_closed_connection_as_an_error() {
         let mut app = TestWindowApp::new(replies(&[]), Vec::new());
 
-        assert!(app.open(1).is_err());
+        assert!(app.open(&Batch::one_by_one(1)).is_err());
     }
 }

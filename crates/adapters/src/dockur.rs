@@ -5,15 +5,19 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use vmtest_domain::scenario::{GlazewmIpc, Observation, TestWindow};
+use vmtest_domain::scenario::{
+    GlazewmIpc, Observation, TestWindow, TestWindowBatch, WindowLifetime, WindowPresence,
+};
 use vmtest_domain::topology::Rect;
 use vmtest_guest_client::GuestDaemonClient;
-use vmtest_protocol::{GlazewmQuery, RectDto, Request, Response, SutProgram, TestWindowDto};
+use vmtest_protocol::{
+    GlazewmQuery, PresenceDto, RectDto, Request, Response, SutProgram, TestWindowDto,
+};
 use vmtest_runner::{
     Clock, DisplayController, GuestExecutor, Hypervisor, Observer, WorkloadController,
 };
 
-use crate::glazewm;
+use crate::glazewm::{self, WindowIdentity};
 
 /// Where the container, the guest, and the files to deploy are.
 #[derive(Clone, Debug)]
@@ -132,7 +136,7 @@ impl DockurGuest {
     }
 
     /// Queries glazewm's monitors, telling the test windows among its windows apart by `test_windows`,
-    /// pairs of id and handle.
+    /// pairs of id and handle, and asking the guest what the OS says of each window.
     fn query_glazewm_monitors(
         &mut self,
         ipc_limit: Duration,
@@ -147,7 +151,45 @@ impl DockurGuest {
             query: GlazewmQuery::Monitors,
             limit_ms: ipc_limit.as_millis().try_into().unwrap_or(u64::MAX),
         };
-        glazewm::monitors_answer(self.request(&request)?, test_windows)
+        let response = self.request(&request)?;
+        let handles = match &response {
+            Response::Output { stdout, .. } => glazewm::window_handles(stdout),
+            _ => Vec::new(),
+        };
+        let presences = self.window_presence(&handles)?;
+        let identify = |handle: i64| WindowIdentity {
+            test_window: test_windows
+                .iter()
+                .find(|(_, test_handle)| *test_handle == handle)
+                .map(|(id, _)| *id),
+            presence: handles
+                .iter()
+                .position(|&known| known == handle)
+                .map_or(WindowPresence::Gone, |index| presences[index]),
+        };
+        glazewm::monitors_answer(response, &identify)
+    }
+
+    fn window_presence(&mut self, handles: &[i64]) -> Result<Vec<WindowPresence>, String> {
+        if handles.is_empty() {
+            return Ok(Vec::new());
+        }
+        let request = Request::WindowPresence {
+            handles: handles.to_vec(),
+        };
+        match self.request(&request)? {
+            Response::WindowPresence { presences } if presences.len() == handles.len() => {
+                Ok(presences
+                    .into_iter()
+                    .map(|presence| match presence {
+                        PresenceDto::TopLevel => WindowPresence::TopLevel,
+                        PresenceDto::Child => WindowPresence::Child,
+                        PresenceDto::Gone => WindowPresence::Gone,
+                    })
+                    .collect())
+            }
+            other => Err(format!("unexpected answer to window_presence: {other:?}")),
+        }
     }
 
     fn test_windows(&mut self) -> Result<Vec<TestWindowDto>, String> {
@@ -288,8 +330,18 @@ impl DisplayController for DockurGuest {
 }
 
 impl WorkloadController for DockurGuest {
-    fn open_test_windows(&mut self, count: u32) -> Result<(), String> {
-        match self.request(&Request::OpenTestWindows { count })? {
+    fn open_test_windows(&mut self, batch: &TestWindowBatch) -> Result<(), String> {
+        let count = batch.count;
+        let milliseconds = |duration: Duration| duration.as_millis().try_into().unwrap_or(u64::MAX);
+        let request = Request::OpenTestWindows {
+            count,
+            within_ms: batch.within.map(milliseconds),
+            lifetime_ms: match batch.lifetime {
+                WindowLifetime::Persistent => None,
+                WindowLifetime::DestroyedAfter(lifetime) => Some(milliseconds(lifetime)),
+            },
+        };
+        match self.request(&request)? {
             Response::TestWindowsOpened { ids } if ids.len() == count as usize => Ok(()),
             other => Err(format!(
                 "unexpected answer to opening {count} test windows: {other:?}"

@@ -2,26 +2,30 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ffi::c_void;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW,
-    GetForegroundWindow, GetMessageW, IDC_ARROW, LoadCursorW, MSG, PostMessageW, PostQuitMessage,
-    RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_DESTROY, WNDCLASSW,
-    WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
+    DispatchMessageW, GetForegroundWindow, GetMessageW, IDC_ARROW, KillTimer, LoadCursorW, MSG,
+    PostMessageW, PostQuitMessage, RegisterClassW, SetTimer, TranslateMessage, WINDOW_EX_STYLE,
+    WM_APP, WM_DESTROY, WM_TIMER, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
 use windows::core::{HSTRING, PCWSTR, w};
 
-use crate::WindowHost;
 use crate::gate::Gate;
+use crate::{Opening, WindowHost};
 
 const CLASS_NAME: PCWSTR = w!("VmtestTestWindow");
 
 /// The message that sends a window's thread into its gate.
 const WM_HANG: u32 = WM_APP + 1;
+
+/// The timer that ends a window with a lifetime.
+const LIFETIME_TIMER: usize = 1;
 
 /// How long a window's thread may take to reach its gate after `WM_HANG` is posted.
 const HANG_LIMIT: Duration = Duration::from_secs(2);
@@ -38,9 +42,9 @@ pub struct Win32Windows {
 }
 
 impl WindowHost for Win32Windows {
-    fn open(&mut self, id: u32) -> Result<i64, String> {
+    fn open(&mut self, id: u32, how: &Opening) -> Result<i64, String> {
         let gate = Arc::new(Gate::default());
-        let handle = open(id, Arc::clone(&gate))?;
+        let handle = open(id, how, Arc::clone(&gate))?;
         self.opened
             .insert(id, (HWND(handle as *mut std::ffi::c_void), gate));
         Ok(handle)
@@ -79,28 +83,52 @@ impl Win32Windows {
 /// How long a new window may take to become the foreground window before `open` returns anyway.
 const FOREGROUND_LIMIT: Duration = Duration::from_secs(2);
 
-/// Opens a normal top-level window titled `vmtest test window <id>` and returns its handle once it exists
-/// and has become the foreground window, or after `FOREGROUND_LIMIT`.
+/// Opens a normal top-level window titled `vmtest test window <id>` and returns its handle once it exists,
+/// and, if `how` says so, once it has become the foreground window or `FOREGROUND_LIMIT` has passed.
 ///
 /// Waiting for the foreground makes windows opened one after another land in the same places on every run:
 /// a window manager places a new window beside the focused one. The window gets a thread of its own, so
-/// that later it can stop processing messages without affecting the others.
-fn open(id: u32, gate: Arc<Gate>) -> Result<i64, String> {
+/// that later it can stop processing messages without affecting the others. A window with a lifetime
+/// destroys itself on its own thread when its timer fires, at once for a lifetime of zero.
+fn open(id: u32, how: &Opening, gate: Arc<Gate>) -> Result<i64, String> {
     let (sender, receiver) = mpsc::channel();
+    let lifetime = how.lifetime;
     std::thread::spawn(move || {
         GATE.with(|own| *own.borrow_mut() = Some(gate));
         let created = create(id);
-        let succeeded = created.is_ok();
+        let window = created
+            .as_ref()
+            .ok()
+            .map(|&handle| HWND(handle as *mut c_void));
         let _ = sender.send(created);
-        if succeeded {
-            pump_messages();
+        let Some(window) = window else {
+            return;
+        };
+        if let Some(lifetime) = lifetime {
+            end_after(window, lifetime);
         }
+        pump_messages();
     });
     let handle = receiver
         .recv()
         .map_err(|_| format!("the thread of window {id} ended before creating it"))??;
-    wait_for_foreground(handle);
+    if how.wait_for_foreground {
+        wait_for_foreground(handle);
+    }
     Ok(handle)
+}
+
+/// Destroys `window` after `lifetime`; called on the window's own thread.
+fn end_after(window: HWND, lifetime: Duration) {
+    // SAFETY: `window` belongs to this thread, as `DestroyWindow` and the timer require.
+    unsafe {
+        if lifetime.is_zero() {
+            let _ = DestroyWindow(window);
+        } else {
+            let milliseconds = u32::try_from(lifetime.as_millis()).unwrap_or(u32::MAX);
+            SetTimer(Some(window), LIFETIME_TIMER, milliseconds, None);
+        }
+    }
 }
 
 fn wait_for_foreground(handle: i64) {
@@ -166,6 +194,11 @@ extern "system" fn window_procedure(
     unsafe {
         if message == WM_DESTROY {
             PostQuitMessage(0);
+            return LRESULT(0);
+        }
+        if message == WM_TIMER && wparam.0 == LIFETIME_TIMER {
+            let _ = KillTimer(Some(window), LIFETIME_TIMER);
+            let _ = DestroyWindow(window);
             return LRESULT(0);
         }
         if message == WM_HANG {

@@ -3,10 +3,12 @@
 use std::time::Duration;
 
 use vmtest_domain::invariant::{
-    glazewm_answers_ipc, glazewm_is_running, monitor_count_matches,
-    tiled_windows_within_working_area,
+    glazewm_answers_ipc, glazewm_is_running, manages_only_existing_top_level_windows,
+    monitor_count_matches, tiled_windows_within_working_area,
 };
-use vmtest_domain::scenario::{GlazewmIpc, Observation, Scenario, Step, StepOutcome, StepVerdict};
+use vmtest_domain::scenario::{
+    GlazewmIpc, Observation, Scenario, Step, StepOutcome, StepVerdict, TestWindowBatch,
+};
 use vmtest_domain::settle::{SettleState, SettleTracker};
 
 /// Brings the guest back to its snapshot.
@@ -35,7 +37,7 @@ pub trait DisplayController {
 /// Starts and stops what the guest runs besides the SUT.
 pub trait WorkloadController {
     /// Opens `count` more test windows and returns once each exists.
-    fn open_test_windows(&mut self, count: u32) -> Result<(), String>;
+    fn open_test_windows(&mut self, batch: &TestWindowBatch) -> Result<(), String>;
     /// Stops test window `id` from processing messages and returns once it has stopped.
     fn hang_test_window(&mut self, id: u32) -> Result<(), String>;
     /// Lets test window `id` process messages again.
@@ -94,7 +96,7 @@ fn apply(
         Step::SetVirtualMonitorCount(count) => guest.set_virtual_monitor_count(*count),
         Step::RemoveVirtualMonitors => guest.remove_virtual_monitors(),
         Step::RestoreVirtualMonitors => guest.restore_virtual_monitors(),
-        Step::OpenTestWindows(count) => guest.open_test_windows(*count),
+        Step::OpenTestWindows(batch) => guest.open_test_windows(batch),
         Step::HangTestWindow(id) => guest.hang_test_window(*id),
         Step::ResumeTestWindow(id) => guest.resume_test_window(*id),
     }
@@ -147,6 +149,7 @@ fn judge(observation: Option<&Observation>) -> StepVerdict {
         GlazewmIpc::Answered(monitors) => vec![
             monitor_count_matches(observation.os_displays().len(), monitors.len()),
             tiled_windows_within_working_area(monitors, observation.test_windows()),
+            manages_only_existing_top_level_windows(monitors),
         ],
         GlazewmIpc::NoAnswer => vec![glazewm_answers_ipc(observation.glazewm())],
         GlazewmIpc::NotRunning => vec![glazewm_is_running(observation.glazewm())],
@@ -162,7 +165,10 @@ fn judge(observation: Option<&Observation>) -> StepVerdict {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmtest_domain::scenario::{ManagedWindow, MonitorLayout, TestWindow, WorkspaceLayout};
+    use vmtest_domain::scenario::{
+        ManagedWindow, MonitorLayout, TestWindow, TestWindowBatch, WindowLifetime, WindowPresence,
+        WorkspaceLayout,
+    };
     use vmtest_domain::topology::Rect;
 
     const SETTLE: SettleSettings = SettleSettings {
@@ -235,8 +241,8 @@ mod tests {
     }
 
     impl WorkloadController for FakeGuest {
-        fn open_test_windows(&mut self, count: u32) -> Result<(), String> {
-            self.log.push(format!("open_test_windows {count}"));
+        fn open_test_windows(&mut self, batch: &TestWindowBatch) -> Result<(), String> {
+            self.log.push(format!("open_test_windows {batch:?}"));
             Ok(())
         }
         fn hang_test_window(&mut self, id: u32) -> Result<(), String> {
@@ -338,14 +344,21 @@ mod tests {
         let mut guest = FakeGuest::observing(vec![observed(2, 2)]);
 
         run(
-            &scenario(vec![Step::OpenTestWindows(3)]),
+            &scenario(vec![Step::OpenTestWindows(TestWindowBatch {
+                count: 3,
+                within: Some(Duration::from_millis(200)),
+                lifetime: WindowLifetime::DestroyedAfter(Duration::ZERO),
+            })]),
             &mut guest,
             &mut FakeClock(Duration::ZERO),
             SETTLE,
         )
         .unwrap();
 
-        assert_eq!(guest.log.last().unwrap(), "open_test_windows 3");
+        assert_eq!(
+            guest.log.last().unwrap(),
+            "open_test_windows TestWindowBatch { count: 3, within: Some(200ms), lifetime: DestroyedAfter(0ns) }"
+        );
     }
 
     #[test]
@@ -354,7 +367,7 @@ mod tests {
 
         run(
             &scenario(vec![
-                Step::OpenTestWindows(2),
+                Step::OpenTestWindows(TestWindowBatch::persistent(2)),
                 Step::HangTestWindow(1),
                 Step::ResumeTestWindow(1),
             ]),
@@ -367,7 +380,7 @@ mod tests {
         assert_eq!(
             guest.log[guest.log.len() - 3..],
             [
-                "open_test_windows 2",
+                "open_test_windows TestWindowBatch { count: 2, within: None, lifetime: Persistent }",
                 "hang_test_window 1",
                 "resume_test_window 1"
             ]
@@ -392,10 +405,18 @@ mod tests {
                 is_displayed: true,
                 has_focus: true,
                 tiling_direction: "horizontal".into(),
-                windows: vec![ManagedWindow {
-                    test_window: Some(0),
-                    state: "tiling".into(),
-                }],
+                windows: vec![
+                    ManagedWindow {
+                        test_window: Some(0),
+                        state: "tiling".into(),
+                        presence: WindowPresence::TopLevel,
+                    },
+                    ManagedWindow {
+                        test_window: None,
+                        state: "tiling".into(),
+                        presence: WindowPresence::Gone,
+                    },
+                ],
             }],
         };
         let observation = Observation::new(
@@ -425,7 +446,11 @@ mod tests {
         let invariants: Vec<_> = violations.iter().map(|v| v.invariant).collect();
         assert_eq!(
             invariants,
-            ["monitor_count_matches", "tiled_windows_within_working_area"]
+            [
+                "monitor_count_matches",
+                "tiled_windows_within_working_area",
+                "manages_only_existing_top_level_windows"
+            ]
         );
     }
 

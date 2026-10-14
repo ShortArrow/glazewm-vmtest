@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use vmtest_protocol::{DisplayDto, RectDto};
+use vmtest_protocol::{DisplayDto, PresenceDto, RectDto};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
@@ -17,7 +17,7 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
-use windows::Win32::UI::WindowsAndMessaging::IsWindow;
+use windows::Win32::UI::WindowsAndMessaging::{GWL_STYLE, GetWindowLongPtrW, IsWindow, WS_CHILD};
 use windows::core::{BOOL, PWSTR};
 
 use crate::TopologySource;
@@ -88,6 +88,22 @@ fn rect(r: RECT) -> RectDto {
         y: r.top,
         width: (r.right - r.left).unsigned_abs(),
         height: (r.bottom - r.top).unsigned_abs(),
+    }
+}
+
+/// Whether window `handle` exists and, if so, whether it is a top-level window rather than a child.
+pub fn window_presence(handle: i64) -> PresenceDto {
+    let window = HWND(handle as *mut std::ffi::c_void);
+    // SAFETY: Both calls accept any value and report a window that does not exist.
+    unsafe {
+        if !IsWindow(Some(window)).as_bool() {
+            return PresenceDto::Gone;
+        }
+        if GetWindowLongPtrW(window, GWL_STYLE) as u32 & WS_CHILD.0 != 0 {
+            PresenceDto::Child
+        } else {
+            PresenceDto::TopLevel
+        }
     }
 }
 
@@ -188,6 +204,19 @@ fn utf16_until_nul(text: &[u16]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn says_a_window_that_does_not_exist_is_gone() {
+        assert_eq!(window_presence(0), PresenceDto::Gone);
+    }
+
+    #[test]
+    fn says_the_desktop_window_is_top_level() {
+        // SAFETY: `GetDesktopWindow` has no preconditions.
+        let desktop = unsafe { windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow() };
+
+        assert_eq!(window_presence(desktop.0 as i64), PresenceDto::TopLevel);
+    }
 
     #[test]
     fn has_no_frame_for_a_window_that_does_not_exist() {

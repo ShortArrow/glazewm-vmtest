@@ -172,15 +172,18 @@
                 "windows": [
                   {
                     "test_window": 0,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   },
                   {
                     "test_window": 1,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   },
                   {
                     "test_window": 2,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   }
                 ]
               }
@@ -288,15 +291,18 @@
                 "windows": [
                   {
                     "test_window": 0,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   },
                   {
                     "test_window": 1,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   },
                   {
                     "test_window": 2,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   }
                 ]
               }
@@ -380,15 +386,18 @@
                 "windows": [
                   {
                     "test_window": 0,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   },
                   {
                     "test_window": 1,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   },
                   {
                     "test_window": 2,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   }
                 ]
               }
@@ -478,15 +487,18 @@
                 "windows": [
                   {
                     "test_window": 0,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   },
                   {
                     "test_window": 1,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   },
                   {
                     "test_window": 2,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   }
                 ]
               }
@@ -601,15 +613,18 @@
                 "windows": [
                   {
                     "test_window": 0,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   },
                   {
                     "test_window": 1,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   },
                   {
                     "test_window": 2,
-                    "state": "tiling"
+                    "state": "tiling",
+                    "presence": "top_level"
                   }
                 ]
               }
