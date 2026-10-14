@@ -137,6 +137,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmtest-load"
+version = "0.1.0"
+dependencies = [
+ "windows",
+]
+
+[[package]]
 name = "vmtest-protocol"
 version = "0.1.0"
 dependencies = [

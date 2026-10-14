@@ -19,6 +19,50 @@ pub enum Step {
     HangTestWindow(u32),
     /// Lets the test window with this id process messages again.
     ResumeTestWindow(u32),
+    /// Starts a load in the guest, replacing a running load of the same kind.
+    StartLoad(Load),
+    /// Stops the running load of this kind, if any.
+    StopLoad(LoadKind),
+}
+
+/// What a load uses up in the guest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LoadKind {
+    /// Every logical processor, busy for `percent` of the time.
+    Cpu,
+    /// `percent` of the physical memory, allocated and kept in use.
+    Memory,
+}
+
+/// A load and its intensity, from 1 to 100 percent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Load {
+    pub kind: LoadKind,
+    pub percent: u8,
+}
+
+/// The loads that the steps applied so far have left running.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ActiveLoads(std::collections::BTreeSet<LoadKind>);
+
+impl ActiveLoads {
+    /// Follows `step`; steps that start or stop no load change nothing.
+    pub fn apply(&mut self, step: &Step) {
+        match step {
+            Step::StartLoad(load) => {
+                self.0.insert(load.kind);
+            }
+            Step::StopLoad(kind) => {
+                self.0.remove(kind);
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether any load is running.
+    pub fn any(&self) -> bool {
+        !self.0.is_empty()
+    }
 }
 
 /// Test windows opened by one step.
@@ -231,6 +275,28 @@ mod tests {
             observation.glazewm(),
             &GlazewmIpc::Answered(vec![monitor(0, 0), monitor(800, 0)])
         );
+    }
+
+    #[test]
+    fn tracks_which_loads_the_steps_so_far_have_left_running() {
+        let cpu = Load {
+            kind: LoadKind::Cpu,
+            percent: 100,
+        };
+        let memory = Load {
+            kind: LoadKind::Memory,
+            percent: 70,
+        };
+        let mut loads = ActiveLoads::default();
+
+        loads.apply(&Step::StartLoad(cpu));
+        loads.apply(&Step::StartLoad(memory));
+        loads.apply(&Step::StopLoad(LoadKind::Cpu));
+        let one_left = loads.any();
+        loads.apply(&Step::StopLoad(LoadKind::Memory));
+
+        assert!(one_left);
+        assert!(!loads.any());
     }
 
     #[test]

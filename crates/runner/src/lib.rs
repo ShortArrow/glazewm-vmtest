@@ -7,7 +7,8 @@ use vmtest_domain::invariant::{
     monitor_count_matches, tiled_windows_within_working_area,
 };
 use vmtest_domain::scenario::{
-    GlazewmIpc, Observation, Scenario, Step, StepOutcome, StepVerdict, TestWindowBatch,
+    ActiveLoads, GlazewmIpc, Load, LoadKind, Observation, Scenario, Step, StepOutcome, StepVerdict,
+    TestWindowBatch,
 };
 use vmtest_domain::settle::{SettleState, SettleTracker};
 
@@ -42,6 +43,10 @@ pub trait WorkloadController {
     fn hang_test_window(&mut self, id: u32) -> Result<(), String>;
     /// Lets test window `id` process messages again.
     fn resume_test_window(&mut self, id: u32) -> Result<(), String>;
+    /// Starts `load`, replacing a running load of the same kind, and returns once it is running.
+    fn start_load(&mut self, load: &Load) -> Result<(), String>;
+    /// Stops the running load of `kind`, if any, and returns once it has stopped.
+    fn stop_load(&mut self, kind: LoadKind) -> Result<(), String>;
 }
 
 /// Reads the guest's current state.
@@ -80,10 +85,12 @@ where
     guest.wait_until_ready()?;
     guest.set_virtual_monitor_count(scenario.virtual_monitors)?;
     guest.start_sut(scenario.ipc_limit)?;
-    let mut outcomes = vec![settled_outcome(scenario, guest, clock, settle)?];
+    let mut loads = ActiveLoads::default();
+    let mut outcomes = vec![settled_outcome(scenario, &loads, guest, clock, settle)?];
     for step in &scenario.steps {
         apply(step, guest)?;
-        outcomes.push(settled_outcome(scenario, guest, clock, settle)?);
+        loads.apply(step);
+        outcomes.push(settled_outcome(scenario, &loads, guest, clock, settle)?);
     }
     Ok(outcomes)
 }
@@ -99,17 +106,20 @@ fn apply(
         Step::OpenTestWindows(batch) => guest.open_test_windows(batch),
         Step::HangTestWindow(id) => guest.hang_test_window(*id),
         Step::ResumeTestWindow(id) => guest.resume_test_window(*id),
+        Step::StartLoad(load) => guest.start_load(load),
+        Step::StopLoad(kind) => guest.stop_load(*kind),
     }
 }
 
 fn settled_outcome(
     scenario: &Scenario,
+    loads: &ActiveLoads,
     guest: &mut impl Observer,
     clock: &mut dyn Clock,
     settle: SettleSettings,
 ) -> Result<StepOutcome, String> {
     let observation = settled_observation(|| guest.observe(scenario.ipc_limit), clock, settle)?;
-    let verdict = judge(observation.as_ref());
+    let verdict = judge(observation.as_ref(), loads);
     Ok(StepOutcome {
         observation,
         verdict,
@@ -141,7 +151,9 @@ fn settled_observation(
 }
 
 /// Judges a settled observation; a glazewm that is not running or did not answer has no monitors to compare.
-fn judge(observation: Option<&Observation>) -> StepVerdict {
+///
+/// While a load runs, a glazewm that does not answer within the IPC limit is not held to it.
+fn judge(observation: Option<&Observation>, loads: &ActiveLoads) -> StepVerdict {
     let Some(observation) = observation else {
         return StepVerdict::Unsettled;
     };
@@ -151,6 +163,7 @@ fn judge(observation: Option<&Observation>) -> StepVerdict {
             tiled_windows_within_working_area(monitors, observation.test_windows()),
             manages_only_existing_top_level_windows(monitors),
         ],
+        GlazewmIpc::NoAnswer if loads.any() => vec![],
         GlazewmIpc::NoAnswer => vec![glazewm_answers_ipc(observation.glazewm())],
         GlazewmIpc::NotRunning => vec![glazewm_is_running(observation.glazewm())],
     };
@@ -166,8 +179,8 @@ fn judge(observation: Option<&Observation>) -> StepVerdict {
 mod tests {
     use super::*;
     use vmtest_domain::scenario::{
-        ManagedWindow, MonitorLayout, TestWindow, TestWindowBatch, WindowLifetime, WindowPresence,
-        WorkspaceLayout,
+        Load, LoadKind, ManagedWindow, MonitorLayout, TestWindow, TestWindowBatch, WindowLifetime,
+        WindowPresence, WorkspaceLayout,
     };
     use vmtest_domain::topology::Rect;
 
@@ -247,6 +260,15 @@ mod tests {
         }
         fn hang_test_window(&mut self, id: u32) -> Result<(), String> {
             self.log.push(format!("hang_test_window {id}"));
+            Ok(())
+        }
+        fn start_load(&mut self, load: &Load) -> Result<(), String> {
+            self.log
+                .push(format!("start_load {:?} {}", load.kind, load.percent));
+            Ok(())
+        }
+        fn stop_load(&mut self, kind: LoadKind) -> Result<(), String> {
+            self.log.push(format!("stop_load {kind:?}"));
             Ok(())
         }
         fn resume_test_window(&mut self, id: u32) -> Result<(), String> {
@@ -562,6 +584,36 @@ mod tests {
         assert_eq!(verdicts[0], StepVerdict::Passed);
         assert!(not_running_alone(&verdicts[1]));
         assert!(not_running_alone(&verdicts[2]));
+    }
+
+    #[test]
+    fn does_not_hold_glazewm_to_the_ipc_limit_while_a_load_runs() {
+        let mut observations = vec![observed(2, 2); 6];
+        observations.extend(vec![unanswered(2); 12]);
+        let mut guest = FakeGuest::observing(observations);
+        let cpu = Load {
+            kind: LoadKind::Cpu,
+            percent: 100,
+        };
+
+        let verdicts = verdicts(
+            run(
+                &scenario(vec![Step::StartLoad(cpu), Step::StopLoad(LoadKind::Cpu)]),
+                &mut guest,
+                &mut FakeClock(Duration::ZERO),
+                SETTLE,
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(verdicts[..2], [StepVerdict::Passed, StepVerdict::Passed]);
+        assert!(
+            matches!(&verdicts[2], StepVerdict::Violated(v) if v[0].invariant == "glazewm_answers_ipc")
+        );
+        assert_eq!(
+            guest.log[guest.log.len() - 2..],
+            ["start_load Cpu 100", "stop_load Cpu"]
+        );
     }
 
     #[test]

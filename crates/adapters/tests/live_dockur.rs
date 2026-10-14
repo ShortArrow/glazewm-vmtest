@@ -1,6 +1,6 @@
 //! Runs a scenario against the dockur/windows guest in guests/dockur-windows.
 //!
-//! Needs `cargo build --release -p vmtest-guest-daemon -p vmtest-test-window-win32`, glazewm built into target/sut/glazewm/release
+//! Needs `cargo build --release -p vmtest-guest-daemon -p vmtest-test-window-win32 -p vmtest-load`, glazewm built into target/sut/glazewm/release
 //! (or the directory named by `VMTEST_GLAZEWM_BUILD`), and the guest image of docs/GUEST-IMAGE.md.
 //!
 //! A scenario with a baseline compares its observations with baselines/<name>.json. With
@@ -14,7 +14,8 @@ use vmtest_adapters::dockur::{DockurConfig, DockurGuest, SystemClock};
 use vmtest_adapters::glazewm::config_without_startup_commands;
 use vmtest_domain::baseline::{Baseline, Deviation};
 use vmtest_domain::scenario::{
-    DEFAULT_IPC_LIMIT, Observation, Scenario, Step, StepVerdict, TestWindowBatch, WindowLifetime,
+    DEFAULT_IPC_LIMIT, Load, LoadKind, Observation, Scenario, Step, StepVerdict, TestWindowBatch,
+    WindowLifetime,
 };
 use vmtest_runner::{SettleSettings, run};
 
@@ -51,6 +52,7 @@ fn config(name: &str, glazewm_config: &str) -> DockurConfig {
         daemon_address: "127.0.0.1:7041".into(),
         daemon_executable: repository.join("target/release/vmtest-guest-daemon.exe"),
         test_window_executable: repository.join("target/release/vmtest-test-window-win32.exe"),
+        load_executable: repository.join("target/release/vmtest-load.exe"),
         daemon_limits: None,
         glazewm_build: std::env::var_os("VMTEST_GLAZEWM_BUILD")
             .map(PathBuf::from)
@@ -212,6 +214,49 @@ fn glazewm_keeps_no_short_lived_window_after_a_burst() {
 
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed; 7]);
+}
+
+/// Under load glazewm may miss an IPC answer that the scenario does not hold it to, so this scenario has
+/// no baseline and is judged by its invariants alone.
+#[test]
+#[ignore = "needs the dockur/windows guest and prebuilt binaries"]
+fn glazewm_tracks_losing_every_display_under_cpu_and_memory_load() {
+    let cpu = Load {
+        kind: LoadKind::Cpu,
+        percent: 100,
+    };
+    let memory = Load {
+        kind: LoadKind::Memory,
+        percent: 70,
+    };
+    let scenario = Scenario {
+        name: "losing every display under load".into(),
+        virtual_monitors: 1,
+        steps: vec![
+            Step::OpenTestWindows(TestWindowBatch::persistent(3)),
+            Step::StartLoad(cpu),
+            Step::RemoveVirtualMonitors,
+            Step::RestoreVirtualMonitors,
+            Step::StopLoad(LoadKind::Cpu),
+            Step::StartLoad(memory),
+            Step::RemoveVirtualMonitors,
+            Step::RestoreVirtualMonitors,
+            Step::StopLoad(LoadKind::Memory),
+        ],
+        ipc_limit: DEFAULT_IPC_LIMIT,
+    };
+    let guest = config("glazewm-config.yaml", &quiet_glazewm_config());
+
+    let outcomes = run(
+        &scenario,
+        &mut DockurGuest::new(guest),
+        &mut SystemClock::start(),
+        SETTLE,
+    )
+    .unwrap();
+
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    assert_eq!(verdicts, vec![StepVerdict::Passed; 10]);
 }
 
 fn compare_or_record(name: &str, observations: &[Option<Observation>]) -> Vec<Deviation> {

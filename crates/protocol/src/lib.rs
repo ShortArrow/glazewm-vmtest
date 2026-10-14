@@ -45,6 +45,15 @@ pub enum Request {
     ResumeTestWindow {
         id: u32,
     },
+    /// Starts a load of `kind` at `percent`, from 1 to 100, replacing a running one of the same kind.
+    StartLoad {
+        kind: LoadKindDto,
+        percent: u8,
+    },
+    /// Stops the running load of `kind`, if any.
+    StopLoad {
+        kind: LoadKindDto,
+    },
 }
 
 /// The SUT programs the harness deploys into the guest.
@@ -100,6 +109,12 @@ pub enum Response {
     WindowPresence {
         presences: Vec<PresenceDto>,
     },
+    LoadStarted {
+        kind: LoadKindDto,
+    },
+    LoadStopped {
+        kind: LoadKindDto,
+    },
     TestWindowHung {
         id: u32,
     },
@@ -140,6 +155,14 @@ pub struct TestWindowDto {
     pub frame: Option<RectDto>,
     /// Whether its message processing has been stopped.
     pub hung: bool,
+}
+
+/// What a load uses up: every logical processor, or the physical memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoadKindDto {
+    Cpu,
+    Memory,
 }
 
 /// Whether a window exists, and whether it is a top-level window.
@@ -338,6 +361,23 @@ mod tests {
         let decoded: Response = decode_line(&encode_line(&response)).unwrap();
 
         assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn starts_and_stops_a_load_by_kind() {
+        assert_eq!(
+            encode_line(&Request::StartLoad {
+                kind: LoadKindDto::Memory,
+                percent: 70
+            }),
+            r#"{"type":"start_load","kind":"memory","percent":70}"#.to_owned() + "\n"
+        );
+        assert_eq!(
+            decode_line::<Response>(r#"{"type":"load_stopped","kind":"cpu"}"#).unwrap(),
+            Response::LoadStopped {
+                kind: LoadKindDto::Cpu
+            }
+        );
     }
 
     #[test]

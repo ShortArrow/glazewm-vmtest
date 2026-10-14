@@ -1,7 +1,8 @@
 //! Entry point of the guest daemon: `vmtest-guest-daemon [listen-address]`, default `0.0.0.0:7041`.
 //!
 //! The SUT is expected at `glazewm\glazewm.exe` and its client at `glazewm\glazewm-cli.exe` beside the daemon's executable,
-//! and the Win32 test-window application at `vmtest-test-window-win32.exe` beside it. Limits on requests
+//! the Win32 test-window application at `vmtest-test-window-win32.exe` beside it, and the load generator
+//! at `vmtest-load.exe`. Limits on requests
 //! are read from `guest-daemon.json` beside it if that file exists; the daemon does not start if it is invalid.
 //! Built without a console, so that no window of its own appears on the desktop under test;
 //! it logs to `guest-daemon.log` beside its executable.
@@ -14,19 +15,31 @@ fn main() -> std::io::Result<()> {
     use std::net::TcpListener;
     use std::sync::Arc;
     use vmtest_guest_daemon::limits::Limits;
+    use vmtest_guest_daemon::load::LoadProcesses;
     use vmtest_guest_daemon::process::ProcessGlazewmCli;
     use vmtest_guest_daemon::test_windows::Batch;
     use vmtest_guest_daemon::test_windows::LaunchedApp;
     use vmtest_guest_daemon::win32::{self, Win32Topology};
     use vmtest_guest_daemon::{
-        CliOutcome, GlazewmCli, SutProcesses, TestWindowHost, TopologySource, serve,
+        CliOutcome, GlazewmCli, LoadHost, SutProcesses, TestWindowHost, TopologySource, serve,
     };
-    use vmtest_protocol::{DisplayDto, PresenceDto, SutProgram, TestWindowDto};
+    use vmtest_protocol::{DisplayDto, LoadKindDto, PresenceDto, SutProgram, TestWindowDto};
 
     struct LiveGuest {
         cli: ProcessGlazewmCli,
         glazewm: std::path::PathBuf,
         test_windows: LaunchedApp,
+        loads: LoadProcesses,
+    }
+
+    impl LoadHost for LiveGuest {
+        fn start_load(&self, kind: LoadKindDto, percent: u8) -> Result<(), String> {
+            self.loads.start(kind, percent)
+        }
+
+        fn stop_load(&self, kind: LoadKindDto) -> Result<(), String> {
+            self.loads.stop(kind)
+        }
     }
 
     impl TestWindowHost for LiveGuest {
@@ -120,6 +133,7 @@ fn main() -> std::io::Result<()> {
         },
         glazewm: sut.join("glazewm.exe"),
         test_windows: LaunchedApp::new(directory.join("vmtest-test-window-win32.exe"), limits),
+        loads: LoadProcesses::new(directory.join("vmtest-load.exe")),
     });
     let listener = TcpListener::bind(&address)?;
     log(format!("listening on {address}"));

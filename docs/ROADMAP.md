@@ -52,6 +52,7 @@ For each mechanism: can it present a monitor add/remove to the guest as a hot-pl
 | Spike | What to find out |
 |---|---|
 | GPU load without a physical GPU | Without GPU passthrough the guest renders in software on the CPU. Does GPU load then differ from CPU load at all, or is GPU partitioning (GPU-P on Hyper-V) needed? |
+| Harness under CPU load | With every vCPU of a 4-core dockur/windows guest loaded to 100 percent, a connection to the guest daemon timed out once in three runs, and the TCP connect itself did not complete within 5 seconds. Does the guest's kernel or the host's forwarding path starve, and does a higher priority for the guest daemon, or leaving one vCPU unloaded, avoid it? |
 | Hung test window | Can a test-window application reliably stop its message processing and resume it later? |
 | Window kinds | For each UI framework, can a small test-window application implement the control protocol, and what does the guest image need (runtimes, sideloading certificates)? For kinds that cannot be built (UWP system apps and the like), which preinstalled application stands in, and does its license allow it in a guest image? |
 

@@ -4,6 +4,7 @@
 pub mod win32;
 
 pub mod limits;
+pub mod load;
 pub mod process;
 pub mod test_windows;
 
@@ -11,7 +12,8 @@ use std::io::{BufRead, Write};
 use std::time::Duration;
 
 use vmtest_protocol::{
-    DisplayDto, PresenceDto, Request, Response, SutProgram, TestWindowDto, decode_line, encode_line,
+    DisplayDto, LoadKindDto, PresenceDto, Request, Response, SutProgram, TestWindowDto,
+    decode_line, encode_line,
 };
 
 use crate::test_windows::Batch;
@@ -64,10 +66,18 @@ pub trait TestWindowHost {
     fn resume(&self, id: u32) -> Result<(), String>;
 }
 
-/// Everything the daemon reads from or does in the guest.
-pub trait Guest: TopologySource + GlazewmCli + SutProcesses + TestWindowHost {}
+/// Starts and stops load in the guest.
+pub trait LoadHost {
+    /// Starts a load of `kind` at `percent`, replacing a running one of the same kind.
+    fn start_load(&self, kind: LoadKindDto, percent: u8) -> Result<(), String>;
+    /// Stops the running load of `kind`, if any.
+    fn stop_load(&self, kind: LoadKindDto) -> Result<(), String>;
+}
 
-impl<T: TopologySource + GlazewmCli + SutProcesses + TestWindowHost> Guest for T {}
+/// Everything the daemon reads from or does in the guest.
+pub trait Guest: TopologySource + GlazewmCli + SutProcesses + TestWindowHost + LoadHost {}
+
+impl<T: TopologySource + GlazewmCli + SutProcesses + TestWindowHost + LoadHost> Guest for T {}
 
 /// Answers one request.
 pub fn handle(request: Request, guest: &dyn Guest) -> Response {
@@ -103,6 +113,14 @@ pub fn handle(request: Request, guest: &dyn Guest) -> Response {
             lifetime_ms,
         }) {
             Ok(ids) => Response::TestWindowsOpened { ids },
+            Err(message) => Response::Error { message },
+        },
+        Request::StartLoad { kind, percent } => match guest.start_load(kind, percent) {
+            Ok(()) => Response::LoadStarted { kind },
+            Err(message) => Response::Error { message },
+        },
+        Request::StopLoad { kind } => match guest.stop_load(kind) {
+            Ok(()) => Response::LoadStopped { kind },
             Err(message) => Response::Error { message },
         },
         Request::WindowPresence { handles } => Response::WindowPresence {
@@ -148,7 +166,9 @@ pub fn serve(
 mod tests {
     use super::*;
     use crate::test_windows::Batch;
-    use vmtest_protocol::{GlazewmQuery, PresenceDto, RectDto, SutProgram, TestWindowDto};
+    use vmtest_protocol::{
+        GlazewmQuery, LoadKindDto, PresenceDto, RectDto, SutProgram, TestWindowDto,
+    };
 
     /// A guest whose test-window host answers from fixed results, and whose other parts are unused.
     struct FixedWindows {
@@ -171,6 +191,16 @@ mod tests {
     impl SutProcesses for FixedWindows {
         fn is_running(&self, _program: SutProgram) -> Result<bool, String> {
             Err("no processes in this fake".into())
+        }
+    }
+
+    impl LoadHost for FixedWindows {
+        fn start_load(&self, kind: LoadKindDto, percent: u8) -> Result<(), String> {
+            assert_eq!((kind, percent), (LoadKindDto::Cpu, 100));
+            Ok(())
+        }
+        fn stop_load(&self, _kind: LoadKindDto) -> Result<(), String> {
+            Err("no load generator in this fake".into())
         }
     }
 
@@ -321,6 +351,16 @@ mod tests {
         }
     }
 
+    impl LoadHost for FixedProcesses {
+        fn start_load(&self, kind: LoadKindDto, percent: u8) -> Result<(), String> {
+            assert_eq!((kind, percent), (LoadKindDto::Cpu, 100));
+            Ok(())
+        }
+        fn stop_load(&self, _kind: LoadKindDto) -> Result<(), String> {
+            Err("no load generator in this fake".into())
+        }
+    }
+
     impl TestWindowHost for FixedProcesses {
         fn open(&self, _batch: &Batch) -> Result<Vec<u32>, String> {
             Err("no test windows in this fake".into())
@@ -386,6 +426,16 @@ mod tests {
         }
     }
 
+    impl LoadHost for FixedTopology {
+        fn start_load(&self, kind: LoadKindDto, percent: u8) -> Result<(), String> {
+            assert_eq!((kind, percent), (LoadKindDto::Cpu, 100));
+            Ok(())
+        }
+        fn stop_load(&self, _kind: LoadKindDto) -> Result<(), String> {
+            Err("no load generator in this fake".into())
+        }
+    }
+
     impl TestWindowHost for FixedTopology {
         fn open(&self, _batch: &Batch) -> Result<Vec<u32>, String> {
             Err("no test windows in this fake".into())
@@ -436,6 +486,16 @@ mod tests {
     impl SutProcesses for FakeCli {
         fn is_running(&self, _program: SutProgram) -> Result<bool, String> {
             Err("no processes in this fake".into())
+        }
+    }
+
+    impl LoadHost for FakeCli {
+        fn start_load(&self, kind: LoadKindDto, percent: u8) -> Result<(), String> {
+            assert_eq!((kind, percent), (LoadKindDto::Cpu, 100));
+            Ok(())
+        }
+        fn stop_load(&self, _kind: LoadKindDto) -> Result<(), String> {
+            Err("no load generator in this fake".into())
         }
     }
 
@@ -542,6 +602,35 @@ mod tests {
             working_area: rect,
             is_primary: true,
         }]
+    }
+
+    #[test]
+    fn answers_that_a_load_has_started_or_why_it_has_not_stopped() {
+        let guest = FixedTopology(Ok(vec![]));
+
+        assert_eq!(
+            handle(
+                Request::StartLoad {
+                    kind: LoadKindDto::Cpu,
+                    percent: 100
+                },
+                &guest
+            ),
+            Response::LoadStarted {
+                kind: LoadKindDto::Cpu
+            }
+        );
+        assert_eq!(
+            handle(
+                Request::StopLoad {
+                    kind: LoadKindDto::Cpu
+                },
+                &guest
+            ),
+            Response::Error {
+                message: "no load generator in this fake".into()
+            }
+        );
     }
 
     #[test]

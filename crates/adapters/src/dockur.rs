@@ -6,12 +6,13 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use vmtest_domain::scenario::{
-    GlazewmIpc, Observation, TestWindow, TestWindowBatch, WindowLifetime, WindowPresence,
+    GlazewmIpc, Load, LoadKind, Observation, TestWindow, TestWindowBatch, WindowLifetime,
+    WindowPresence,
 };
 use vmtest_domain::topology::Rect;
 use vmtest_guest_client::GuestDaemonClient;
 use vmtest_protocol::{
-    GlazewmQuery, PresenceDto, RectDto, Request, Response, SutProgram, TestWindowDto,
+    GlazewmQuery, LoadKindDto, PresenceDto, RectDto, Request, Response, SutProgram, TestWindowDto,
 };
 use vmtest_runner::{
     Clock, DisplayController, GuestExecutor, Hypervisor, Observer, WorkloadController,
@@ -35,6 +36,8 @@ pub struct DockurConfig {
     pub daemon_executable: PathBuf,
     /// The Win32 test-window application, delivered beside the daemon.
     pub test_window_executable: PathBuf,
+    /// The load generator, delivered beside the daemon.
+    pub load_executable: PathBuf,
     /// Limits on the daemon's requests, delivered as `guest-daemon.json`; `None` keeps the daemon's defaults.
     pub daemon_limits: Option<PathBuf>,
     /// Directory holding glazewm.exe, glazewm-cli.exe and glazewm-watcher.exe.
@@ -257,6 +260,7 @@ impl GuestExecutor for DockurGuest {
             &[
                 &self.config.daemon_executable.clone(),
                 &self.config.test_window_executable.clone(),
+                &self.config.load_executable.clone(),
             ],
             "C:/vmtest/",
         )?;
@@ -354,6 +358,28 @@ impl WorkloadController for DockurGuest {
         }
     }
 
+    fn start_load(&mut self, load: &Load) -> Result<(), String> {
+        let kind = load_kind(load.kind);
+        let request = Request::StartLoad {
+            kind,
+            percent: load.percent,
+        };
+        match self.request(&request)? {
+            Response::LoadStarted { kind: started } if started == kind => Ok(()),
+            other => Err(format!("unexpected answer to starting {load:?}: {other:?}")),
+        }
+    }
+
+    fn stop_load(&mut self, kind: LoadKind) -> Result<(), String> {
+        let dto = load_kind(kind);
+        match self.request(&Request::StopLoad { kind: dto })? {
+            Response::LoadStopped { kind: stopped } if stopped == dto => Ok(()),
+            other => Err(format!(
+                "unexpected answer to stopping the {kind:?} load: {other:?}"
+            )),
+        }
+    }
+
     fn hang_test_window(&mut self, id: u32) -> Result<(), String> {
         match self.request(&Request::HangTestWindow { id })? {
             Response::TestWindowHung { id: hung } if hung == id => Ok(()),
@@ -416,6 +442,13 @@ impl Clock for SystemClock {
 
     fn sleep(&mut self, duration: Duration) {
         std::thread::sleep(duration);
+    }
+}
+
+fn load_kind(kind: LoadKind) -> LoadKindDto {
+    match kind {
+        LoadKind::Cpu => LoadKindDto::Cpu,
+        LoadKind::Memory => LoadKindDto::Memory,
     }
 }
 

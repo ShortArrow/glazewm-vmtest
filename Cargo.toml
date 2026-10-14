@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/adapters", "crates/domain", "crates/guest-client", "crates/guest-daemon", "crates/protocol", "crates/runner", "crates/test-window-win32"]
+members = ["crates/adapters", "crates/domain", "crates/guest-client", "crates/guest-daemon", "crates/load", "crates/protocol", "crates/runner", "crates/test-window-win32"]
 
 [workspace.package]
 edition = "2024"
