@@ -31,7 +31,10 @@ impl<R: BufRead, W: Write> TestWindowApp<R, W> {
     /// Ids continue from the windows opened before, so that a window keeps its id for the whole run.
     pub fn open(&mut self, count: u32) -> Result<Vec<u32>, String> {
         let first = u32::try_from(self.opened.len()).map_err(|_| "too many test windows")?;
-        (first..first + count)
+        let end = first
+            .checked_add(count)
+            .ok_or_else(|| format!("{count} more test windows would exhaust the ids"))?;
+        (first..end)
             .map(|id| {
                 let handle = self.open_one(id)?;
                 self.opened.push((id, handle));
@@ -225,6 +228,18 @@ mod tests {
             error.starts_with("cannot start the test-window application"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn rejects_a_count_whose_ids_would_overflow_without_sending_anything() {
+        let mut app = TestWindowApp::new(
+            replies(&[AppReply::Opened { id: 0, handle: 10 }]),
+            Vec::new(),
+        );
+        app.open(1).unwrap();
+
+        assert!(app.open(u32::MAX).is_err());
+        assert_eq!(commands(app.writer()), [AppCommand::Open { id: 0 }]);
     }
 
     #[test]
