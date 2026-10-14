@@ -67,10 +67,16 @@ impl<R: BufRead, W: Write> TestWindowApp<R, W> {
             .checked_add(count)
             .ok_or_else(|| format!("{count} more test windows would exhaust the ids"))?;
         let start = Instant::now();
+        if let Some(span) = batch.within {
+            start
+                .checked_add(span)
+                .ok_or_else(|| format!("a span of {span:?} is beyond the clock"))?;
+        }
         (first..end)
             .map(|id| {
                 if let Some(span) = batch.within {
-                    let due = start + span * (id - first) / count;
+                    let step = span / count;
+                    let due = start + step * (id - first);
                     std::thread::sleep(due.saturating_duration_since(Instant::now()));
                 }
                 let handle = self.open_one(id, batch)?;
@@ -372,6 +378,19 @@ mod tests {
             lifetime_ms: Some(5),
         };
         assert_eq!(commands(app.writer()), [short_lived(0), short_lived(1)]);
+    }
+
+    #[test]
+    fn rejects_a_span_beyond_the_clock_without_sending_anything() {
+        let mut app = TestWindowApp::new(replies(&[]), Vec::new());
+        let batch = Batch {
+            count: 2,
+            within: Some(Duration::MAX),
+            lifetime_ms: None,
+        };
+
+        assert!(app.open(&batch).is_err());
+        assert!(commands(app.writer()).is_empty());
     }
 
     #[test]
