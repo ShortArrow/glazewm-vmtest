@@ -9,11 +9,20 @@ use std::time::{Duration, Instant};
 
 use vmtest_protocol::{AppCommand, AppReply, decode_line, encode_line};
 
+/// A window a test-window application has opened.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenedWindow {
+    pub id: u32,
+    pub handle: i64,
+    /// Whether its message processing is stopped.
+    pub hung: bool,
+}
+
 /// One running test-window application and the windows it has opened.
 pub struct TestWindowApp<R, W> {
     reader: R,
     writer: W,
-    opened: Vec<(u32, i64)>,
+    opened: Vec<OpenedWindow>,
 }
 
 impl<R: BufRead, W: Write> TestWindowApp<R, W> {
@@ -37,15 +46,57 @@ impl<R: BufRead, W: Write> TestWindowApp<R, W> {
         (first..end)
             .map(|id| {
                 let handle = self.open_one(id)?;
-                self.opened.push((id, handle));
+                self.opened.push(OpenedWindow {
+                    id,
+                    handle,
+                    hung: false,
+                });
                 Ok(id)
             })
             .collect()
     }
 
-    /// The id and handle of every window opened so far, in the order of opening.
-    pub fn handles(&self) -> &[(u32, i64)] {
+    /// Every window opened so far, in the order of opening.
+    pub fn windows(&self) -> &[OpenedWindow] {
         &self.opened
+    }
+
+    /// Stops window `id` from processing messages; returns once the application says it has stopped.
+    pub fn hang(&mut self, id: u32) -> Result<(), String> {
+        self.change(id, AppCommand::Hang { id }, AppReply::Hung { id }, true)
+    }
+
+    /// Lets window `id` process messages again.
+    pub fn resume(&mut self, id: u32) -> Result<(), String> {
+        self.change(
+            id,
+            AppCommand::Resume { id },
+            AppReply::Resumed { id },
+            false,
+        )
+    }
+
+    fn change(
+        &mut self,
+        id: u32,
+        command: AppCommand,
+        expected: AppReply,
+        hung: bool,
+    ) -> Result<(), String> {
+        let index = self
+            .opened
+            .iter()
+            .position(|window| window.id == id)
+            .ok_or_else(|| format!("no test window {id} has been opened"))?;
+        match self.command(&command)? {
+            reply if reply == expected => {
+                self.opened[index].hung = hung;
+                Ok(())
+            }
+            other => Err(format!(
+                "the test-window application answered {command:?} with {other:?}"
+            )),
+        }
     }
 
     fn open_one(&mut self, id: u32) -> Result<i64, String> {
@@ -107,13 +158,29 @@ impl LaunchedApp {
         app.open(count)
     }
 
-    /// The id and handle of every window opened so far.
-    pub fn handles(&self) -> Result<Vec<(u32, i64)>, String> {
+    /// Every window opened so far.
+    pub fn windows(&self) -> Result<Vec<OpenedWindow>, String> {
         let app = self.app.lock().map_err(|_| "a previous request panicked")?;
         Ok(app
             .as_ref()
-            .map(|app| app.handles().to_vec())
+            .map(|app| app.windows().to_vec())
             .unwrap_or_default())
+    }
+
+    pub fn hang(&self, id: u32) -> Result<(), String> {
+        self.with_running(|app| app.hang(id))
+    }
+
+    pub fn resume(&self, id: u32) -> Result<(), String> {
+        self.with_running(|app| app.resume(id))
+    }
+
+    fn with_running(
+        &self,
+        action: impl FnOnce(&mut TestWindowApp<BufReader<TcpStream>, TcpStream>) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let mut app = self.app.lock().map_err(|_| "a previous request panicked")?;
+        action(app.as_mut().ok_or("no test window has been opened")?)
     }
 
     /// Starts the application with the address of a fresh loopback listener and waits for it to connect.
@@ -186,7 +253,63 @@ mod tests {
                 AppCommand::Open { id: 2 }
             ]
         );
-        assert_eq!(app.handles(), [(0, 10), (1, 11), (2, 12)]);
+        let handles: Vec<_> = app.windows().iter().map(|w| (w.id, w.handle)).collect();
+        assert_eq!(handles, [(0, 10), (1, 11), (2, 12)]);
+    }
+
+    fn opened(
+        replies_after_opening: &[AppReply],
+    ) -> TestWindowApp<std::io::Cursor<Vec<u8>>, Vec<u8>> {
+        let mut all = vec![
+            AppReply::Opened { id: 0, handle: 10 },
+            AppReply::Opened { id: 1, handle: 11 },
+        ];
+        all.extend_from_slice(replies_after_opening);
+        let mut app = TestWindowApp::new(replies(&all), Vec::new());
+        app.open(2).unwrap();
+        app
+    }
+
+    fn hung_ids<R: BufRead, W: Write>(app: &TestWindowApp<R, W>) -> Vec<u32> {
+        app.windows()
+            .iter()
+            .filter(|window| window.hung)
+            .map(|window| window.id)
+            .collect()
+    }
+
+    #[test]
+    fn stops_and_resumes_a_window_and_remembers_which_is_stopped() {
+        let mut app = opened(&[AppReply::Hung { id: 1 }, AppReply::Resumed { id: 1 }]);
+
+        app.hang(1).unwrap();
+        let while_hung = hung_ids(&app);
+        app.resume(1).unwrap();
+
+        assert_eq!(while_hung, [1]);
+        assert!(hung_ids(&app).is_empty());
+        assert_eq!(
+            commands(app.writer())[2..],
+            [AppCommand::Hang { id: 1 }, AppCommand::Resume { id: 1 }]
+        );
+    }
+
+    #[test]
+    fn refuses_to_stop_a_window_it_has_not_opened() {
+        let mut app = opened(&[]);
+
+        assert!(app.hang(5).is_err());
+        assert_eq!(commands(app.writer()).len(), 2);
+    }
+
+    #[test]
+    fn does_not_count_a_window_as_stopped_when_the_application_answers_otherwise() {
+        let mut app = opened(&[AppReply::Error {
+            message: "window 1 is already hung".into(),
+        }]);
+
+        assert!(app.hang(1).is_err());
+        assert!(hung_ids(&app).is_empty());
     }
 
     #[test]
@@ -215,7 +338,7 @@ mod tests {
         );
 
         assert!(app.open(1).is_err());
-        assert!(app.handles().is_empty());
+        assert!(app.windows().is_empty());
     }
 
     #[test]

@@ -28,7 +28,8 @@ pub fn monitor_count_matches(os_displays: usize, glazewm_monitors: usize) -> Res
 /// Checks that every tiled test window on a displayed workspace lies within its monitor's working area.
 ///
 /// The frame compared is the one the OS reports, not the one glazewm meant to set. Windows on hidden workspaces
-/// are where glazewm's hide method leaves them, so they are not compared.
+/// are where glazewm's hide method leaves them, and a window that does not process messages cannot be moved,
+/// so neither is compared; that the others still hold is what a hung window must not change.
 pub fn tiled_windows_within_working_area(
     monitors: &[MonitorLayout],
     test_windows: &[TestWindow],
@@ -46,7 +47,7 @@ pub fn tiled_windows_within_working_area(
         for id in tiled {
             let frame = test_windows
                 .iter()
-                .find(|window| window.id == id)
+                .find(|window| window.id == id && !window.hung)
                 .and_then(|window| window.frame);
             if let Some(frame) = frame.filter(|frame| !monitor.working_area.contains(frame)) {
                 expected.push(format!("test window {id} within {}", monitor.working_area));
@@ -148,6 +149,7 @@ mod tests {
         TestWindow {
             id,
             frame: Some(frame),
+            hung: false,
         }
     }
 
@@ -194,6 +196,20 @@ mod tests {
     }
 
     #[test]
+    fn leaves_a_window_that_does_not_process_messages_alone() {
+        let monitors = [monitor_showing(vec![managed(1, "tiling")], true)];
+        let hung = TestWindow {
+            hung: true,
+            ..test_window(1, PAST_RIGHT)
+        };
+
+        assert_eq!(
+            tiled_windows_within_working_area(&monitors, &[hung]),
+            Ok(())
+        );
+    }
+
+    #[test]
     fn leaves_windows_without_a_frame_to_compare_alone() {
         let monitors = [monitor_showing(
             vec![
@@ -205,7 +221,11 @@ mod tests {
             ],
             true,
         )];
-        let gone = TestWindow { id: 3, frame: None };
+        let gone = TestWindow {
+            id: 3,
+            frame: None,
+            hung: false,
+        };
 
         assert_eq!(
             tiled_windows_within_working_area(&monitors, &[gone]),

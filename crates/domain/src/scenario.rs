@@ -16,6 +16,10 @@ pub enum Step {
     RestoreVirtualMonitors,
     /// Opens this many more test windows, one after another.
     OpenTestWindows(u32),
+    /// Stops the message processing of the test window with this id.
+    HangTestWindow(u32),
+    /// Lets the test window with this id process messages again.
+    ResumeTestWindow(u32),
 }
 
 /// Given an initial number of virtual monitors, when the steps run in order.
@@ -60,6 +64,8 @@ pub struct TestWindow {
     pub id: u32,
     /// The visible frame as the OS reports it, or `None` when the window no longer exists.
     pub frame: Option<Rect>,
+    /// Whether the harness has stopped the window's message processing.
+    pub hung: bool,
 }
 
 /// One monitor as glazewm reports it, with its workspaces in glazewm's order.
@@ -190,7 +196,11 @@ mod tests {
 
     #[test]
     fn orders_test_windows_by_id() {
-        let window = |id| TestWindow { id, frame: None };
+        let window = |id| TestWindow {
+            id,
+            frame: None,
+            hung: false,
+        };
 
         let observation = Observation::new(
             vec![],

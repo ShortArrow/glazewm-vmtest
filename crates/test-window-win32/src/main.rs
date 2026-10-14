@@ -9,7 +9,8 @@
 fn main() -> std::io::Result<()> {
     use std::io::BufReader;
     use std::net::TcpStream;
-    use vmtest_test_window_win32::{serve, window};
+    use vmtest_test_window_win32::serve;
+    use vmtest_test_window_win32::window::Win32Windows;
     use windows::Win32::UI::HiDpi::{
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
     };
@@ -20,7 +21,11 @@ fn main() -> std::io::Result<()> {
     // SAFETY: Called once at start-up, before any window exists.
     let _ = unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
     let stream = TcpStream::connect(address)?;
-    serve(BufReader::new(stream.try_clone()?), stream, window::open)
+    serve(
+        BufReader::new(stream.try_clone()?),
+        stream,
+        &mut Win32Windows::default(),
+    )
 }
 
 #[cfg(not(windows))]

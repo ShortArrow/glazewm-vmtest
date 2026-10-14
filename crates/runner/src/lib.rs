@@ -36,6 +36,10 @@ pub trait DisplayController {
 pub trait WorkloadController {
     /// Opens `count` more test windows and returns once each exists.
     fn open_test_windows(&mut self, count: u32) -> Result<(), String>;
+    /// Stops test window `id` from processing messages and returns once it has stopped.
+    fn hang_test_window(&mut self, id: u32) -> Result<(), String>;
+    /// Lets test window `id` process messages again.
+    fn resume_test_window(&mut self, id: u32) -> Result<(), String>;
 }
 
 /// Reads the guest's current state.
@@ -91,6 +95,8 @@ fn apply(
         Step::RemoveVirtualMonitors => guest.remove_virtual_monitors(),
         Step::RestoreVirtualMonitors => guest.restore_virtual_monitors(),
         Step::OpenTestWindows(count) => guest.open_test_windows(*count),
+        Step::HangTestWindow(id) => guest.hang_test_window(*id),
+        Step::ResumeTestWindow(id) => guest.resume_test_window(*id),
     }
 }
 
@@ -233,6 +239,14 @@ mod tests {
             self.log.push(format!("open_test_windows {count}"));
             Ok(())
         }
+        fn hang_test_window(&mut self, id: u32) -> Result<(), String> {
+            self.log.push(format!("hang_test_window {id}"));
+            Ok(())
+        }
+        fn resume_test_window(&mut self, id: u32) -> Result<(), String> {
+            self.log.push(format!("resume_test_window {id}"));
+            Ok(())
+        }
     }
 
     impl Observer for FakeGuest {
@@ -335,6 +349,32 @@ mod tests {
     }
 
     #[test]
+    fn stops_and_resumes_a_test_window_as_steps() {
+        let mut guest = FakeGuest::observing(vec![observed(2, 2)]);
+
+        run(
+            &scenario(vec![
+                Step::OpenTestWindows(2),
+                Step::HangTestWindow(1),
+                Step::ResumeTestWindow(1),
+            ]),
+            &mut guest,
+            &mut FakeClock(Duration::ZERO),
+            SETTLE,
+        )
+        .unwrap();
+
+        assert_eq!(
+            guest.log[guest.log.len() - 3..],
+            [
+                "open_test_windows 2",
+                "hang_test_window 1",
+                "resume_test_window 1"
+            ]
+        );
+    }
+
+    #[test]
     fn reports_every_invariant_a_settled_state_violates() {
         let reaching_past_its_monitor = Rect {
             x: 700,
@@ -363,6 +403,7 @@ mod tests {
             vec![TestWindow {
                 id: 0,
                 frame: Some(reaching_past_its_monitor),
+                hung: false,
             }],
             GlazewmIpc::Answered(vec![monitor]),
         );

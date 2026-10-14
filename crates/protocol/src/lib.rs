@@ -27,6 +27,14 @@ pub enum Request {
     },
     /// Asks for every test window opened so far, with its frame as the OS reports it.
     TestWindows,
+    /// Stops test window `id` from processing messages and answers once it has stopped.
+    HangTestWindow {
+        id: u32,
+    },
+    /// Lets test window `id` process messages again.
+    ResumeTestWindow {
+        id: u32,
+    },
 }
 
 /// The SUT programs the harness deploys into the guest.
@@ -79,6 +87,12 @@ pub enum Response {
     TestWindows {
         windows: Vec<TestWindowDto>,
     },
+    TestWindowHung {
+        id: u32,
+    },
+    TestWindowResumed {
+        id: u32,
+    },
     Error {
         message: String,
     },
@@ -111,6 +125,8 @@ pub struct TestWindowDto {
     pub handle: i64,
     /// The visible frame, in physical pixels, or `None` when the window no longer exists.
     pub frame: Option<RectDto>,
+    /// Whether its message processing has been stopped.
+    pub hung: bool,
 }
 
 /// What the guest daemon tells a test-window application to do.
@@ -122,6 +138,10 @@ pub struct TestWindowDto {
 pub enum AppCommand {
     /// Opens a normal top-level window, persistent and responsive, identified by `id`.
     Open { id: u32 },
+    /// Stops window `id`'s thread from processing messages until `Resume`.
+    Hang { id: u32 },
+    /// Lets window `id`'s thread process messages again.
+    Resume { id: u32 },
 }
 
 /// What a test-window application answers, one line per command.
@@ -132,6 +152,13 @@ pub enum AppReply {
     Opened {
         id: u32,
         handle: i64,
+    },
+    /// The window's thread has stopped processing messages.
+    Hung {
+        id: u32,
+    },
+    Resumed {
+        id: u32,
     },
     Error {
         message: String,
@@ -262,11 +289,13 @@ mod tests {
                         width: 600,
                         height: 400,
                     }),
+                    hung: false,
                 },
                 TestWindowDto {
                     id: 1,
                     handle: 0x5678,
                     frame: None,
+                    hung: true,
                 },
             ],
         };
@@ -274,6 +303,33 @@ mod tests {
         let decoded: Response = decode_line(&encode_line(&response)).unwrap();
 
         assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn asks_to_stop_and_resume_a_test_window_by_id() {
+        assert_eq!(
+            encode_line(&Request::HangTestWindow { id: 1 }),
+            "{\"type\":\"hang_test_window\",\"id\":1}
+"
+        );
+        assert_eq!(
+            encode_line(&Request::ResumeTestWindow { id: 1 }),
+            "{\"type\":\"resume_test_window\",\"id\":1}
+"
+        );
+    }
+
+    #[test]
+    fn tells_a_test_window_application_to_stop_and_resume_a_window() {
+        assert_eq!(
+            encode_line(&AppCommand::Hang { id: 2 }),
+            "{\"type\":\"hang\",\"id\":2}
+"
+        );
+        assert_eq!(
+            decode_line::<AppReply>("{\"type\":\"resumed\",\"id\":2}").unwrap(),
+            AppReply::Resumed { id: 2 }
+        );
     }
 
     #[test]

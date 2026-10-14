@@ -60,6 +60,7 @@ struct ObservationFile {
 struct TestWindowFile {
     id: u32,
     frame: Option<RectFile>,
+    hung: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -120,6 +121,7 @@ impl From<&Observation> for ObservationFile {
                 .map(|window| TestWindowFile {
                     id: window.id,
                     frame: window.frame.as_ref().map(RectFile::from),
+                    hung: window.hung,
                 })
                 .collect(),
             glazewm: match observation.glazewm() {
@@ -149,6 +151,7 @@ impl From<ObservationFile> for Observation {
                 .map(|window| TestWindow {
                     id: window.id,
                     frame: window.frame.map(Rect::from),
+                    hung: window.hung,
                 })
                 .collect(),
             glazewm,
@@ -266,8 +269,13 @@ mod tests {
                 TestWindow {
                     id: 0,
                     frame: Some(RECT),
+                    hung: false,
                 },
-                TestWindow { id: 1, frame: None },
+                TestWindow {
+                    id: 1,
+                    frame: None,
+                    hung: true,
+                },
             ],
             GlazewmIpc::Answered(vec![MonitorLayout {
                 bounds: RECT,

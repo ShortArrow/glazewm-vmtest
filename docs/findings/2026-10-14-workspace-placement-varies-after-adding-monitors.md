@@ -19,8 +19,8 @@ After step 3 the guest OS reports the same four displays in every run, and glaze
 
 | Runs | Workspace 2, with the three windows | Other workspaces |
 |---|---|---|
-| 4 of 5 | On the platform's display, which hides workspace 1 | 3, 4 and 5 on the three virtual monitors |
-| 1 of 5 | Still on the first virtual monitor | 1 on the platform's display; 3 and 4 on the other two virtual monitors |
+| 6 of 8 | On the platform's display, which hides workspace 1 | 3, 4 and 5 on the three virtual monitors |
+| 2 of 8 | Still on the first virtual monitor | 1 on the platform's display; 3 and 4 on the other two virtual monitors |
 
 No invariant was violated in any run; the difference shows only as a baseline deviation.
 

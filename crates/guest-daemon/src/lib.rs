@@ -53,6 +53,10 @@ pub trait TestWindowHost {
     fn open(&self, count: u32) -> Result<Vec<u32>, String>;
     /// Every test window opened so far, in the order of opening, with its frame as the OS reports it now.
     fn windows(&self) -> Result<Vec<TestWindowDto>, String>;
+    /// Stops test window `id` from processing messages and returns once it has stopped.
+    fn hang(&self, id: u32) -> Result<(), String>;
+    /// Lets test window `id` process messages again.
+    fn resume(&self, id: u32) -> Result<(), String>;
 }
 
 /// Everything the daemon reads from or does in the guest.
@@ -90,6 +94,14 @@ pub fn handle(request: Request, guest: &dyn Guest) -> Response {
         },
         Request::TestWindows => match guest.windows() {
             Ok(windows) => Response::TestWindows { windows },
+            Err(message) => Response::Error { message },
+        },
+        Request::HangTestWindow { id } => match guest.hang(id) {
+            Ok(()) => Response::TestWindowHung { id },
+            Err(message) => Response::Error { message },
+        },
+        Request::ResumeTestWindow { id } => match guest.resume(id) {
+            Ok(()) => Response::TestWindowResumed { id },
             Err(message) => Response::Error { message },
         },
     }
@@ -153,6 +165,14 @@ mod tests {
         fn windows(&self) -> Result<Vec<TestWindowDto>, String> {
             Ok(self.windows.clone())
         }
+        fn hang(&self, id: u32) -> Result<(), String> {
+            assert_eq!(id, 1);
+            Ok(())
+        }
+        fn resume(&self, id: u32) -> Result<(), String> {
+            assert_eq!(id, 1);
+            Err("the test-window application closed its connection".into())
+        }
     }
 
     #[test]
@@ -184,11 +204,31 @@ mod tests {
     }
 
     #[test]
+    fn answers_that_a_test_window_has_stopped_or_why_it_cannot_resume() {
+        let guest = FixedWindows {
+            opened: Ok(vec![]),
+            windows: vec![],
+        };
+
+        assert_eq!(
+            handle(Request::HangTestWindow { id: 1 }, &guest),
+            Response::TestWindowHung { id: 1 }
+        );
+        assert_eq!(
+            handle(Request::ResumeTestWindow { id: 1 }, &guest),
+            Response::Error {
+                message: "the test-window application closed its connection".into()
+            }
+        );
+    }
+
+    #[test]
     fn answers_with_every_test_window_and_its_frame() {
         let window = TestWindowDto {
             id: 0,
             handle: 10,
             frame: None,
+            hung: false,
         };
         let guest = FixedWindows {
             opened: Ok(vec![]),
@@ -223,6 +263,12 @@ mod tests {
             Err("no test windows in this fake".into())
         }
         fn windows(&self) -> Result<Vec<TestWindowDto>, String> {
+            Err("no test windows in this fake".into())
+        }
+        fn hang(&self, _id: u32) -> Result<(), String> {
+            Err("no test windows in this fake".into())
+        }
+        fn resume(&self, _id: u32) -> Result<(), String> {
             Err("no test windows in this fake".into())
         }
     }
@@ -281,6 +327,12 @@ mod tests {
         fn windows(&self) -> Result<Vec<TestWindowDto>, String> {
             Err("no test windows in this fake".into())
         }
+        fn hang(&self, _id: u32) -> Result<(), String> {
+            Err("no test windows in this fake".into())
+        }
+        fn resume(&self, _id: u32) -> Result<(), String> {
+            Err("no test windows in this fake".into())
+        }
     }
 
     impl GlazewmCli for FixedTopology {
@@ -323,6 +375,12 @@ mod tests {
             Err("no test windows in this fake".into())
         }
         fn windows(&self) -> Result<Vec<TestWindowDto>, String> {
+            Err("no test windows in this fake".into())
+        }
+        fn hang(&self, _id: u32) -> Result<(), String> {
+            Err("no test windows in this fake".into())
+        }
+        fn resume(&self, _id: u32) -> Result<(), String> {
             Err("no test windows in this fake".into())
         }
     }

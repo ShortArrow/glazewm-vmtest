@@ -34,14 +34,23 @@ fn main() -> std::io::Result<()> {
         fn windows(&self) -> Result<Vec<TestWindowDto>, String> {
             Ok(self
                 .test_windows
-                .handles()?
+                .windows()?
                 .into_iter()
-                .map(|(id, handle)| TestWindowDto {
-                    id,
-                    handle,
-                    frame: win32::window_frame(handle),
+                .map(|window| TestWindowDto {
+                    id: window.id,
+                    handle: window.handle,
+                    frame: win32::window_frame(window.handle),
+                    hung: window.hung,
                 })
                 .collect())
+        }
+
+        fn hang(&self, id: u32) -> Result<(), String> {
+            self.test_windows.hang(id)
+        }
+
+        fn resume(&self, id: u32) -> Result<(), String> {
+            self.test_windows.resume(id)
         }
     }
 

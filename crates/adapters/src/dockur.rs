@@ -296,6 +296,24 @@ impl WorkloadController for DockurGuest {
             )),
         }
     }
+
+    fn hang_test_window(&mut self, id: u32) -> Result<(), String> {
+        match self.request(&Request::HangTestWindow { id })? {
+            Response::TestWindowHung { id: hung } if hung == id => Ok(()),
+            other => Err(format!(
+                "unexpected answer to hanging test window {id}: {other:?}"
+            )),
+        }
+    }
+
+    fn resume_test_window(&mut self, id: u32) -> Result<(), String> {
+        match self.request(&Request::ResumeTestWindow { id })? {
+            Response::TestWindowResumed { id: resumed } if resumed == id => Ok(()),
+            other => Err(format!(
+                "unexpected answer to resuming test window {id}: {other:?}"
+            )),
+        }
+    }
 }
 
 impl Observer for DockurGuest {
@@ -318,6 +336,7 @@ impl Observer for DockurGuest {
             .map(|window| TestWindow {
                 id: window.id,
                 frame: window.frame.map(rect),
+                hung: window.hung,
             })
             .collect();
         Ok(Observation::new(os_displays, test_windows, glazewm))

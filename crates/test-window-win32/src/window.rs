@@ -1,18 +1,80 @@
 //! Plain Win32 windows, each on its own thread with its own message loop.
 
-use std::sync::mpsc;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DispatchMessageW,
-    GetForegroundWindow, GetMessageW, IDC_ARROW, LoadCursorW, MSG, PostQuitMessage, RegisterClassW,
-    TranslateMessage, WINDOW_EX_STYLE, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    GetForegroundWindow, GetMessageW, IDC_ARROW, LoadCursorW, MSG, PostMessageW, PostQuitMessage,
+    RegisterClassW, TranslateMessage, WINDOW_EX_STYLE, WM_APP, WM_DESTROY, WNDCLASSW,
+    WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
 use windows::core::{HSTRING, PCWSTR, w};
 
+use crate::WindowHost;
+use crate::gate::Gate;
+
 const CLASS_NAME: PCWSTR = w!("VmtestTestWindow");
+
+/// The message that sends a window's thread into its gate.
+const WM_HANG: u32 = WM_APP + 1;
+
+/// How long a window's thread may take to reach its gate after `WM_HANG` is posted.
+const HANG_LIMIT: Duration = Duration::from_secs(2);
+
+thread_local! {
+    /// The gate of the window that owns this thread.
+    static GATE: RefCell<Option<Arc<Gate>>> = const { RefCell::new(None) };
+}
+
+/// The windows this application has opened, each with the gate that can stop it.
+#[derive(Default)]
+pub struct Win32Windows {
+    opened: HashMap<u32, (HWND, Arc<Gate>)>,
+}
+
+impl WindowHost for Win32Windows {
+    fn open(&mut self, id: u32) -> Result<i64, String> {
+        let gate = Arc::new(Gate::default());
+        let handle = open(id, Arc::clone(&gate))?;
+        self.opened
+            .insert(id, (HWND(handle as *mut std::ffi::c_void), gate));
+        Ok(handle)
+    }
+
+    /// Posts `WM_HANG`, so that the window stops while handling a message, as a busy application does.
+    fn hang(&mut self, id: u32) -> Result<(), String> {
+        let (window, gate) = self.window(id)?;
+        gate.close();
+        // SAFETY: `window` is a window this application created; posting to a destroyed one fails harmlessly.
+        unsafe { PostMessageW(Some(window), WM_HANG, WPARAM(0), LPARAM(0)) }
+            .map_err(|error| format!("PostMessageW to window {id} failed: {error}"))?;
+        if gate.wait_until_holding(HANG_LIMIT) {
+            Ok(())
+        } else {
+            gate.open();
+            Err(format!("window {id} did not stop within {HANG_LIMIT:?}"))
+        }
+    }
+
+    fn resume(&mut self, id: u32) -> Result<(), String> {
+        self.window(id)?.1.open();
+        Ok(())
+    }
+}
+
+impl Win32Windows {
+    fn window(&self, id: u32) -> Result<(HWND, Arc<Gate>), String> {
+        self.opened
+            .get(&id)
+            .map(|(window, gate)| (*window, Arc::clone(gate)))
+            .ok_or_else(|| format!("no window {id} has been opened"))
+    }
+}
 
 /// How long a new window may take to become the foreground window before `open` returns anyway.
 const FOREGROUND_LIMIT: Duration = Duration::from_secs(2);
@@ -23,9 +85,10 @@ const FOREGROUND_LIMIT: Duration = Duration::from_secs(2);
 /// Waiting for the foreground makes windows opened one after another land in the same places on every run:
 /// a window manager places a new window beside the focused one. The window gets a thread of its own, so
 /// that later it can stop processing messages without affecting the others.
-pub fn open(id: u32) -> Result<i64, String> {
+fn open(id: u32, gate: Arc<Gate>) -> Result<i64, String> {
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
+        GATE.with(|own| *own.borrow_mut() = Some(gate));
         let created = create(id);
         let succeeded = created.is_ok();
         let _ = sender.send(created);
@@ -103,6 +166,12 @@ extern "system" fn window_procedure(
     unsafe {
         if message == WM_DESTROY {
             PostQuitMessage(0);
+            return LRESULT(0);
+        }
+        if message == WM_HANG {
+            if let Some(gate) = GATE.with(|own| own.borrow().clone()) {
+                gate.hold_while_closed();
+            }
             return LRESULT(0);
         }
         DefWindowProcW(window, message, wparam, lparam)

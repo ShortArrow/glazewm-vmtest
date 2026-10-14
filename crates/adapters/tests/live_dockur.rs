@@ -131,6 +131,43 @@ fn tiled_test_windows_stay_within_their_working_area_across_monitor_count_change
     );
 }
 
+#[test]
+#[ignore = "needs the dockur/windows guest and prebuilt binaries"]
+fn a_hung_test_window_does_not_stop_glazewm_managing_the_others() {
+    let scenario = Scenario {
+        name: "hung test window across losing every display".into(),
+        virtual_monitors: 1,
+        steps: vec![
+            Step::OpenTestWindows(3),
+            Step::HangTestWindow(1),
+            Step::RemoveVirtualMonitors,
+            Step::RestoreVirtualMonitors,
+            Step::ResumeTestWindow(1),
+        ],
+        ipc_limit: DEFAULT_IPC_LIMIT,
+    };
+    let guest = config("glazewm-config.yaml", &quiet_glazewm_config());
+
+    let outcomes = run(
+        &scenario,
+        &mut DockurGuest::new(guest),
+        &mut SystemClock::start(),
+        SETTLE,
+    )
+    .unwrap();
+
+    let observations: Vec<_> = outcomes.iter().map(|o| o.observation.clone()).collect();
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    let deviations = compare_or_record(
+        "hung-test-window-across-losing-every-display",
+        &observations,
+    );
+    assert_eq!(
+        (verdicts, deviations),
+        (vec![StepVerdict::Passed; 6], vec![])
+    );
+}
+
 fn compare_or_record(name: &str, observations: &[Option<Observation>]) -> Vec<Deviation> {
     let path = repository().join("baselines").join(format!("{name}.json"));
     if std::env::var("VMTEST_RECORD").as_deref() == Ok("1") {
