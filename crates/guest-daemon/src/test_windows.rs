@@ -172,9 +172,6 @@ impl<R: BufRead, W: Write> TestWindowApp<R, W> {
     }
 }
 
-/// How long a started test-window application may take to connect back.
-const CONNECT_LIMIT: Duration = Duration::from_secs(3);
-
 /// A test-window application started on the first request and kept for the rest of the daemon's life.
 pub struct LaunchedApp {
     executable: PathBuf,
@@ -238,6 +235,7 @@ impl LaunchedApp {
             .spawn()
             .map_err(cannot_start)?;
         listener.set_nonblocking(true).map_err(cannot_start)?;
+        let connect_limit = Duration::from_millis(self.limits.test_window_connect_limit_ms);
         let start = Instant::now();
         let stream = loop {
             match listener.accept() {
@@ -245,9 +243,9 @@ impl LaunchedApp {
                 Err(error) if error.kind() != std::io::ErrorKind::WouldBlock => {
                     return Err(cannot_start(error));
                 }
-                Err(_) if start.elapsed() >= CONNECT_LIMIT => {
+                Err(_) if start.elapsed() >= connect_limit => {
                     return Err(format!(
-                        "the test-window application did not connect within {CONNECT_LIMIT:?}"
+                        "the test-window application did not connect within {connect_limit:?}"
                     ));
                 }
                 Err(_) => std::thread::sleep(Duration::from_millis(20)),
@@ -449,6 +447,24 @@ mod tests {
         assert!(
             error.starts_with("cannot start the test-window application"),
             "{error}"
+        );
+    }
+
+    #[test]
+    fn gives_up_on_an_application_that_does_not_connect_within_the_configured_limit() {
+        let limits = Limits {
+            test_window_connect_limit_ms: 200,
+            ..Limits::default()
+        };
+        let never_connects =
+            PathBuf::from(std::env::var("SystemRoot").unwrap()).join(r"System32\whoami.exe");
+        let host = LaunchedApp::new(never_connects, limits);
+
+        let error = host.open(&Batch::one_by_one(1)).unwrap_err();
+
+        assert_eq!(
+            error,
+            "the test-window application did not connect within 200ms"
         );
     }
 

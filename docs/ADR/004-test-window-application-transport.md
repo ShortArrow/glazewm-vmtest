@@ -9,7 +9,7 @@ The guest daemon tells test-window applications to open windows, stop and resume
 The forces:
 
 - Every framework's language has to speak the transport: Rust, C#, JavaScript, Dart, Java, C++ and others.
-- An elevated test window has to be started through a scheduled task with `RunLevel Highest`, because the daemon runs at the user's integrity level. No pipe then exists between the daemon and the application.
+- An elevated test window has to be started through a scheduled task with `RunLevel Highest`, because the daemon runs at the user's integrity level. No pipe then exists between the daemon and the application. A process started that way, at high integrity, connects to a loopback listener at medium integrity; this was checked in the guest image on 2026-10-16.
 - The harness already talks JSON, one object per line, between the runner and the daemon (ADR 002).
 
 ## Decision
@@ -27,7 +27,7 @@ The daemon listens on a loopback TCP port it picks for each application and star
 ## Consequences
 
 - The port is reachable by any process in the guest, without authentication. This holds on the same premises as ADR 002: the commands are typed and start nothing, and the guest holds no secrets.
-- An application that does not connect within a few seconds of starting is reported as a failed request, not waited for.
+- An application that does not connect within a limit set in the daemon's configuration is reported as a failed request, not waited for.
 
 ## History
 

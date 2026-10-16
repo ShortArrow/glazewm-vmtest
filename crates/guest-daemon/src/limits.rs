@@ -1,4 +1,5 @@
-//! How much one request may ask of the guest daemon, so that no request keeps it busy without end.
+//! How much one request may ask of the guest daemon, and how long the daemon waits for what it starts,
+//! so that no request keeps it busy without end.
 //!
 //! The limits come from a file the runner delivers beside the daemon, never from a request, so that
 //! nothing reaching the daemon's port can raise them.
@@ -9,12 +10,14 @@ use serde::Deserialize;
 
 use crate::test_windows::Batch;
 
-/// The most one request may ask for.
+/// The most one request may ask for, and the longest the daemon waits for what it starts.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Limits {
     pub max_test_windows_per_request: u32,
     pub max_test_window_span_ms: u64,
+    /// How long a started test-window application may take to connect back.
+    pub test_window_connect_limit_ms: u64,
 }
 
 impl Default for Limits {
@@ -22,6 +25,7 @@ impl Default for Limits {
         Self {
             max_test_windows_per_request: 500,
             max_test_window_span_ms: 60_000,
+            test_window_connect_limit_ms: 3_000,
         }
     }
 }
@@ -76,6 +80,11 @@ mod tests {
                 .check(&batch(1, Some(Duration::from_millis(60_001))))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn waits_3_seconds_for_a_test_window_application_to_connect_by_default() {
+        assert_eq!(Limits::default().test_window_connect_limit_ms, 3_000);
     }
 
     #[test]
