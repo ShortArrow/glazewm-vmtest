@@ -104,6 +104,40 @@ pub fn manages_only_existing_top_level_windows(
     })
 }
 
+/// Checks that every monitor glazewm tracks displays exactly one workspace.
+pub fn every_monitor_displays_one_workspace(monitors: &[MonitorLayout]) -> Result<(), Violation> {
+    let observed: Vec<String> = monitors
+        .iter()
+        .filter_map(|monitor| {
+            let names = |displayed: bool| {
+                monitor
+                    .workspaces
+                    .iter()
+                    .filter(|workspace| workspace.is_displayed == displayed)
+                    .map(|workspace| workspace.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let displayed = monitor.workspaces.iter().filter(|w| w.is_displayed).count();
+            let problem = match (monitor.workspaces.len(), displayed) {
+                (_, 1) => return None,
+                (0, _) => "no workspace".to_owned(),
+                (_, 0) => format!("none of workspaces {} displayed", names(false)),
+                _ => format!("workspaces {} displayed", names(true)),
+            };
+            Some(format!("monitor {}: {problem}", monitor.bounds))
+        })
+        .collect();
+    if observed.is_empty() {
+        return Ok(());
+    }
+    Err(Violation {
+        invariant: "every_monitor_displays_one_workspace",
+        expected: "one displayed workspace on every monitor".into(),
+        observed: observed.join("; "),
+    })
+}
+
 /// Checks that a glazewm process was running when the guest was observed.
 pub fn glazewm_is_running(answer: &GlazewmIpc) -> Result<(), Violation> {
     match answer {
@@ -366,5 +400,65 @@ mod tests {
     #[test]
     fn expects_one_monitor_while_all_displays_are_gone() {
         assert_eq!(monitor_count_matches(0, 1), Ok(()));
+    }
+
+    fn workspace(name: &str, is_displayed: bool) -> WorkspaceLayout {
+        WorkspaceLayout {
+            name: name.into(),
+            is_displayed,
+            has_focus: false,
+            tiling_direction: "horizontal".into(),
+            windows: vec![],
+        }
+    }
+
+    fn monitor_at(x: i32, workspaces: Vec<WorkspaceLayout>) -> MonitorLayout {
+        let bounds = Rect {
+            x,
+            y: 0,
+            width: 1280,
+            height: 800,
+        };
+        MonitorLayout {
+            bounds,
+            working_area: bounds,
+            dpi: 96,
+            has_focus: false,
+            workspaces,
+        }
+    }
+
+    #[test]
+    fn holds_when_every_monitor_displays_one_of_its_workspaces() {
+        let monitors = [
+            monitor_at(0, vec![workspace("1", true), workspace("2", false)]),
+            monitor_at(1280, vec![workspace("3", true)]),
+        ];
+
+        assert_eq!(every_monitor_displays_one_workspace(&monitors), Ok(()));
+    }
+
+    #[test]
+    fn is_violated_by_each_monitor_that_displays_no_workspace_or_more_than_one() {
+        let monitors = [
+            monitor_at(-1280, vec![]),
+            monitor_at(0, vec![workspace("1", true), workspace("2", false)]),
+            monitor_at(1280, vec![workspace("3", false)]),
+            monitor_at(2560, vec![workspace("4", true), workspace("5", true)]),
+        ];
+
+        assert_eq!(
+            every_monitor_displays_one_workspace(&monitors),
+            Err(Violation {
+                invariant: "every_monitor_displays_one_workspace",
+                expected: "one displayed workspace on every monitor".into(),
+                observed: [
+                    "monitor 1280x800 at (-1280, 0): no workspace",
+                    "monitor 1280x800 at (1280, 0): none of workspaces 3 displayed",
+                    "monitor 1280x800 at (2560, 0): workspaces 4, 5 displayed",
+                ]
+                .join("; "),
+            })
+        );
     }
 }

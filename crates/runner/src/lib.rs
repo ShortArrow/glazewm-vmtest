@@ -3,8 +3,9 @@
 use std::time::Duration;
 
 use vmtest_domain::invariant::{
-    glazewm_answers_ipc, glazewm_is_running, manages_only_existing_top_level_windows,
-    monitor_count_matches, tiled_windows_within_working_area,
+    every_monitor_displays_one_workspace, glazewm_answers_ipc, glazewm_is_running,
+    manages_only_existing_top_level_windows, monitor_count_matches,
+    tiled_windows_within_working_area,
 };
 use vmtest_domain::scenario::{
     ActiveLoads, GlazewmIpc, Load, LoadKind, Observation, Scenario, Step, StepOutcome, StepVerdict,
@@ -162,6 +163,7 @@ fn judge(observation: Option<&Observation>, loads: &ActiveLoads) -> StepVerdict 
             monitor_count_matches(observation.os_displays().len(), monitors.len()),
             tiled_windows_within_working_area(monitors, observation.test_windows()),
             manages_only_existing_top_level_windows(monitors),
+            every_monitor_displays_one_workspace(monitors),
         ],
         GlazewmIpc::NoAnswer if loads.any() => vec![],
         GlazewmIpc::NoAnswer => vec![glazewm_answers_ipc(observation.glazewm())],
@@ -302,12 +304,19 @@ mod tests {
     fn observed(os_displays: usize, glazewm_monitors: usize) -> Observation {
         let monitors = rects(glazewm_monitors)
             .into_iter()
-            .map(|bounds| MonitorLayout {
+            .enumerate()
+            .map(|(index, bounds)| MonitorLayout {
                 bounds,
                 working_area: bounds,
                 dpi: 96,
                 has_focus: false,
-                workspaces: vec![],
+                workspaces: vec![WorkspaceLayout {
+                    name: (index + 1).to_string(),
+                    is_displayed: true,
+                    has_focus: false,
+                    tiling_direction: "horizontal".into(),
+                    windows: vec![],
+                }],
             })
             .collect();
         Observation::new(rects(os_displays), vec![], GlazewmIpc::Answered(monitors))
@@ -441,14 +450,21 @@ mod tests {
                 ],
             }],
         };
+        let without_workspace = MonitorLayout {
+            bounds: rects(2)[1],
+            working_area: rects(2)[1],
+            dpi: 96,
+            has_focus: false,
+            workspaces: vec![],
+        };
         let observation = Observation::new(
-            rects(2),
+            rects(3),
             vec![TestWindow {
                 id: 0,
                 frame: Some(reaching_past_its_monitor),
                 hung: false,
             }],
-            GlazewmIpc::Answered(vec![monitor]),
+            GlazewmIpc::Answered(vec![monitor, without_workspace]),
         );
         let mut guest = FakeGuest::observing(vec![observation]);
 
@@ -471,7 +487,8 @@ mod tests {
             [
                 "monitor_count_matches",
                 "tiled_windows_within_working_area",
-                "manages_only_existing_top_level_windows"
+                "manages_only_existing_top_level_windows",
+                "every_monitor_displays_one_workspace"
             ]
         );
     }
