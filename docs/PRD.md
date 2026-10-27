@@ -99,8 +99,8 @@ Regression coverage comes first: the harness pins the current behaviour of glaze
 
 ## Constraints
 
-- Windows guests run on a Windows 11 Pro host, using Hyper-V and Docker Desktop (WSL2 backend).
-- dockur/windows requires KVM. On a Windows 11 host this goes through nested virtualization in WSL2.
+- Windows guests run on Hyper-V, on a Windows 11 Pro host dedicated to the harness (docs/ADR/005-windows-guest-platform.md).
+- dockur/windows requires KVM, so it runs on a Linux host with KVM. On a Windows host it would depend on nested virtualization in WSL2.
 - In the guest, the SUT runs in the interactive desktop session of a user that logs on automatically. Processes started through SSH or PowerShell Direct run in a non-interactive session without that desktop.
 - macOS guests run only on an Apple Silicon Mac host, through Virtualization.framework, and no such host is available. The macOS software license agreement permits macOS virtual machines only on Apple-branded hardware already running macOS, at most two additional copies per machine, for purposes including software development and testing; Virtualization.framework enforces the same limit of two.
 - Windows guests use an evaluation edition or a license the user owns.

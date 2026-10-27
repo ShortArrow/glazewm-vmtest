@@ -99,8 +99,8 @@ glazewmとzebarの、ディスプレイ構成の変化に関わる不具合を�
 
 ## 制約
 
-- WindowsゲストはWindows 11 Proホストで動かす。Hyper-VとDocker Desktop（WSL2バックエンド）を使う。
-- dockur/windowsはKVMを必要とする。Windows 11ホストではWSL2の入れ子仮想化を経由する。
+- Windowsゲストは、ハーネス専用のWindows 11 ProホストのHyper-Vで動かす（docs/ADR/005-windows-guest-platform.jp.md）。
+- dockur/windowsはKVMを必要とするので、KVMのあるLinuxホストで動かす。WindowsホストではWSL2の入れ子仮想化に依存することになる。
 - ゲスト内のSUTは、自動ログオンするユーザーの対話デスクトップセッションで動かす。SSHやPowerShell Directから起動したプロセスは、そのデスクトップを持たない非対話セッションで動く。
 - macOSゲストはApple SiliconのMacホスト上で、Virtualization.frameworkを使ってしか動かせず、そのホストは手元にない。macOSの使用許諾契約が仮想マシンでの実行を認めるのは、macOSが動いているApple製ハードウェア上で、1台につき追加2コピーまで、ソフトウェア開発やテストなどの目的に限られる。Virtualization.frameworkも同じく2つまでに制限している。
 - Windowsゲストには評価版か、利用者が保有するライセンスを使う。
