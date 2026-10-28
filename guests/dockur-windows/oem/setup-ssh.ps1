@@ -16,6 +16,7 @@ if (-not (Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction Silentl
     New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' `
         -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22
 }
+Set-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -Profile Any
 
 $authorizedKeys = 'C:\ProgramData\ssh\administrators_authorized_keys'
 Get-Content -Path (Join-Path $PSScriptRoot 'authorized_key.pub') |
