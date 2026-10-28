@@ -1,23 +1,43 @@
 # ゲストイメージ
 
-dockur/windows用のWindowsゲストは、guests/dockur-windows/compose.yamlと、そのqcow2ディスク内のスナップショットで決まる。スナップショットはgitではなくDockerのボリューム`glazewm-vmtest-win11-storage`にあるので、このページに作り直し方を書く。
+Windowsゲストは、Windows 11 Proのインストールと、それに続くスナップショットの連なりでできている。ハーネスは最後の`daemon-task`を復元する。スナップショットはgitにないので、このページにHyper-Vとdockur/windowsそれぞれでの作り直し方を書く。
 
 ## スナップショット
 
-各スナップショットは、1つ上のスナップショットに表の変更を加えたもの。ハーネスは`daemon-task`を復元する。
+各スナップショットは、1つ上のスナップショットに表の変更を加えたもの。
 
 | スナップショット | 加えるもの |
 |---|---|
-| `clean` | Windows 11 Proの無人インストール。ユーザー`fixture`が自動ログオンする。`oem/setup-ssh.ps1`がsshdを有効にし、`.secrets/`の鍵を登録する |
-| `uac-on` | `HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`の`EnableLUA=1`と、再起動 |
+| `clean` | Windows 11 Proの無人インストール。ユーザー`fixture`が自動ログオンする。`guests/dockur-windows/oem/setup-ssh.ps1`がsshdを有効にし、`guests/dockur-windows/.secrets/`の鍵を登録する |
+| `uac-on` | dockur/windowsだけ。そのインストールはUACをオフにするので、`HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`の`EnableLUA=1`と、再起動を加える。Hyper-VのインストールはUACをオンのまま残すので、Hyper-Vでは`clean`の次が`vdd`になる |
 | `vdd` | VirtualDrivers/Virtual-Display-Driver `25.7.23`。署名者の証明書を`LocalMachine\TrustedPublisher`に登録し、`Root\MttVDD`デバイスを作り、`pnputil`でドライバーを入れ、`C:\VirtualDisplayDriver\vdd_settings.xml`を置く |
 | `vcredist` | Microsoft Visual C++ 2015〜2022 x64再頒布可能パッケージ |
 | `daemon-task` | TCP 7041の受信を許すファイアウォール規則`vmtest-guest-daemon`。`C:\vmtest\vmtest-guest-daemon.exe`を`fixture`として、対話ログオン種別、`RunLevel Limited`、トリガーなしで実行するスケジュールタスク`vmtest-guest-daemon` |
 
-## 作り直し方
+## 資格情報
 
-1. `guests/dockur-windows/.env`に`GUEST_PASSWORD=<パスワード>`を書き、`.secrets/id_ed25519`を生成して、その公開鍵を`oem/authorized_key.pub`にコピーする。
-2. guests/dockur-windowsで`docker compose up -d`を実行し、`ssh -p 2222 fixture@127.0.0.1`が応答するまで待つ。
-3. 上の表の各行について、SSHで変更を加え、ゲスト内からシャットダウンし（`shutdown /s /t 0`）、`dockurr/windows`イメージの`qemu-img snapshot -c <名前> /storage/data.qcow2`でスナップショットを作る。手順はdockur-windowsスキルのとおり。
+どちらの基盤も、guests/dockur-windowsにある同じものを使う。
 
-各手順で使ったコマンドはdocs/spikes/にある。
+- `.env`。`GUEST_PASSWORD=<パスワード>`で`fixture`のパスワードを書く。
+- `.secrets/id_ed25519`。ハーネスが接続に使う鍵で、その公開鍵を`oem/authorized_key.pub`にコピーする。
+
+## Hyper-Vで作り直す
+
+ゲストは、ハーネス用のHyper-Vホスト上の仮想マシン`vmtest-win11`である。
+
+1. ホストで、ホストに接続しているネットワークアダプターに`External`という外部仮想スイッチを作る。ゲストは同じネットワークからアドレスを受け取り、インターネットに出られる。
+2. `guests/hyperv-windows/build-answer-iso.ps1`で回答ファイルのISOを作る。入力は`guests/hyperv-windows/answer/autounattend.xml`、`oem/setup-ssh.ps1`、`oem/authorized_key.pub`、`GUEST_PASSWORD`、インストールメディアでのProの`/IMAGE/NAME`（`Windows 11 Pro`）である。
+3. 仮想マシンを作る。第2世代、ローカルのキープロテクターと仮想TPM、`MicrosoftWindows`テンプレートのセキュアブート、プロセッサ4個、固定メモリ8 GB、新しい64 GBのVHDX、`External`スイッチ、自動チェックポイントはオフ。Windows 11のインストールISOと回答ファイルのISOを2台のDVDドライブにつなぎ、1台目から起動する。
+4. 起動し、「Press any key to boot from CD or DVD」で`root\virtualization\v2`の`Msvm_Keyboard.TypeKey`からキーを押す。最初の再起動のあとは押さず、ゲストがディスクから起動するようにする。`ssh fixture@<ゲストのアドレス>`が応答するまで待つ。アドレスは`Get-VMNetworkAdapter`で分かる。
+5. `vdd`、`vcredist`、`daemon-task`の順に、手順に要るものをゲストにコピーし、SSHで次を実行する。
+   - `vdd`：`guests/hyperv-windows/install-vdd.ps1 -DriverFolder <フォルダー>`。フォルダーは、リリースのアセット`VirtualDisplayDriver-x86.Driver.Only.zip`（SHA-256 `e24210692b442b39af763536330ce78b423f19342b7a7792c26de3944e418b3a`）の`VirtualDisplayDriver`フォルダー。
+   - `vcredist`：`guests/hyperv-windows/install-vcredist.ps1`。
+   - `daemon-task`：`guests/hyperv-windows/install-daemon-task.ps1 -User fixture`。
+6. `clean`のあとと各手順のあとに、コピーしたものを消し、ゲスト内からシャットダウンし（`shutdown /s /t 0`）、仮想マシンが止まってから`Checkpoint-VM -SnapshotName <名前>`で標準チェックポイントを取る。
+
+## dockur/windowsで作り直す
+
+ゲストはguests/dockur-windows/compose.yamlで決まり、スナップショットはDockerのボリューム`glazewm-vmtest-win11-storage`内のqcow2ディスクにある。
+
+1. guests/dockur-windowsで`docker compose up -d`を実行し、`ssh -p 2222 fixture@127.0.0.1`が応答するまで待つ。
+2. 表の各行について、SSHで変更を加え、ゲスト内からシャットダウンし（`shutdown /s /t 0`）、`dockurr/windows`イメージの`qemu-img snapshot -c <名前> /storage/data.qcow2`でスナップショットを作る。手順はdockur-windowsスキルのとおり。`vdd`、`vcredist`、`daemon-task`の変更は、guests/hyperv-windowsのスクリプトで加えられる。
