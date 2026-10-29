@@ -12,7 +12,7 @@ Windowsゲストは、Windows 11 Proのインストールと、それに続く�
 | `uac-on` | dockur/windowsだけ。そのインストールはUACをオフにするので、`HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`の`EnableLUA=1`と、再起動を加える。Hyper-VのインストールはUACをオンのまま残すので、Hyper-Vでは`clean`の次が`vdd`になる |
 | `vdd` | VirtualDrivers/Virtual-Display-Driver `25.7.23`。署名者の証明書を`LocalMachine\TrustedPublisher`に登録し、`Root\MttVDD`デバイスを作り、`pnputil`でドライバーを入れ、`C:\VirtualDisplayDriver\vdd_settings.xml`を置く |
 | `vcredist` | Microsoft Visual C++ 2015〜2022 x64再頒布可能パッケージ |
-| `daemon-task` | TCP 7041の受信を許すファイアウォール規則`vmtest-guest-daemon`。`C:\vmtest\vmtest-guest-daemon.exe`を`fixture`として、対話ログオン種別、`RunLevel Limited`、トリガーなしで実行するスケジュールタスク`vmtest-guest-daemon` |
+| `daemon-task` | `C:\vmtest\vmtest-guest-daemon.exe 127.0.0.1:7041`を`fixture`として、対話ログオン種別、`RunLevel Limited`、トリガーなしで実行するスケジュールタスク`vmtest-guest-daemon`。TCP 7041を開けるファイアウォール規則は作らず、ハーネスはSSHのポート転送でデーモンにつなぐ。dockur/windowsでは引数なしで実行して`0.0.0.0:7041`で待ち受け、ファイアウォール規則`vmtest-guest-daemon`でTCP 7041の受信を許す。コンテナがそのポートをホストのループバックにしか公開しないので、ネットワークからは届かない |
 
 ## 資格情報
 
@@ -40,4 +40,4 @@ Windowsゲストは、Windows 11 Proのインストールと、それに続く�
 ゲストはguests/dockur-windows/compose.yamlで決まり、スナップショットはDockerのボリューム`glazewm-vmtest-win11-storage`内のqcow2ディスクにある。
 
 1. guests/dockur-windowsで`docker compose up -d`を実行し、`ssh -p 2222 fixture@127.0.0.1`が応答するまで待つ。
-2. 表の各行について、SSHで変更を加え、ゲスト内からシャットダウンし（`shutdown /s /t 0`）、`dockurr/windows`イメージの`qemu-img snapshot -c <名前> /storage/data.qcow2`でスナップショットを作る。手順はdockur-windowsスキルのとおり。`vdd`、`vcredist`、`daemon-task`の変更は、guests/hyperv-windowsのスクリプトで加えられる。
+2. 表の各行について、SSHで変更を加え、ゲスト内からシャットダウンし（`shutdown /s /t 0`）、`dockurr/windows`イメージの`qemu-img snapshot -c <名前> /storage/data.qcow2`でスナップショットを作る。手順はdockur-windowsスキルのとおり。`vdd`と`vcredist`の変更は、guests/hyperv-windowsのスクリプトで加えられる。

@@ -12,7 +12,7 @@ Each snapshot is the one above it plus the listed change.
 | `uac-on` | dockur/windows only, whose install turns UAC off: `EnableLUA=1` in `HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`, then a reboot. The Hyper-V install leaves UAC on, so `vdd` follows `clean` there |
 | `vdd` | VirtualDrivers/Virtual-Display-Driver `25.7.23`: its signer certificate in `LocalMachine\TrustedPublisher`, a `Root\MttVDD` device, the driver installed with `pnputil`, `C:\VirtualDisplayDriver\vdd_settings.xml` |
 | `vcredist` | Microsoft Visual C++ 2015–2022 x64 redistributable |
-| `daemon-task` | Firewall rule `vmtest-guest-daemon` allowing TCP 7041 inbound; scheduled task `vmtest-guest-daemon` running `C:\vmtest\vmtest-guest-daemon.exe` as `fixture`, interactive logon type, `RunLevel Limited`, no trigger |
+| `daemon-task` | Scheduled task `vmtest-guest-daemon` running `C:\vmtest\vmtest-guest-daemon.exe 127.0.0.1:7041` as `fixture`, interactive logon type, `RunLevel Limited`, no trigger. No firewall rule opens TCP 7041; the harness reaches the daemon through an SSH port forward. dockur/windows instead runs the daemon without the argument, so it listens on `0.0.0.0:7041`, and opens TCP 7041 inbound with the firewall rule `vmtest-guest-daemon`, since the container publishes that port on the host's loopback only |
 
 ## Credentials
 
@@ -40,4 +40,4 @@ The guest is the virtual machine `vmtest-win11` on the harness's Hyper-V host.
 The guest is defined by guests/dockur-windows/compose.yaml, and the snapshots live in the qcow2 disk in the Docker volume `glazewm-vmtest-win11-storage`.
 
 1. `docker compose up -d` in guests/dockur-windows and wait until `ssh -p 2222 fixture@127.0.0.1` answers.
-2. For each row of the table: make the change over SSH, shut the guest down from inside (`shutdown /s /t 0`), and create the snapshot with `qemu-img snapshot -c <name> /storage/data.qcow2` from the `dockurr/windows` image, as the dockur-windows skill describes. The scripts in guests/hyperv-windows make the changes for `vdd`, `vcredist` and `daemon-task`.
+2. For each row of the table: make the change over SSH, shut the guest down from inside (`shutdown /s /t 0`), and create the snapshot with `qemu-img snapshot -c <name> /storage/data.qcow2` from the `dockurr/windows` image, as the dockur-windows skill describes. The scripts in guests/hyperv-windows make the changes for `vdd` and `vcredist`.

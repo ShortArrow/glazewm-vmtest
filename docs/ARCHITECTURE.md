@@ -55,7 +55,7 @@ Port responsibilities:
 | `DisplayController` | Change the guest topology per monitor |
 | `SessionController` | Connect and disconnect RDP / VNC clients; lock and unlock; sleep and resume |
 | `WorkloadController` | Start and stop CPU / memory / GPU load; create, hang, resume, and close test windows |
-| `GuestExecutor` | Transfer files to the guest and send requests to the guest daemon, which listens on TCP inside the guest and speaks JSON, one object per line |
+| `GuestExecutor` | Transfer files to the guest and send requests to the guest daemon, which listens on TCP inside the guest and speaks JSON, one object per line. The daemon has no authentication and can make glazewm run commands, so its port is never reachable from a network: it is reached through an SSH port forward, or through a port published on the host's loopback |
 | `Observer` | Capture topology, window bounds, glazewm state, zebar window placement, process liveness, IPC responsiveness, and screenshots |
 
 ### Adapters
