@@ -50,10 +50,15 @@ pub struct GuestConfig {
 
 /// A zebar built from its repository: the executable, with the settings UI built into it, and the repository's
 /// `resources` directory, which it reads its starter widgets and templates from at run time.
+///
+/// `config`, when set, is a directory whose entries are copied into zebar's configuration directory before zebar
+/// starts, such as a `settings.json` and the widget packs it names; without it, zebar's first run installs its
+/// starter widgets.
 #[derive(Clone, Debug)]
 pub struct ZebarBuild {
     pub executable: PathBuf,
     pub resources: PathBuf,
+    pub config: Option<PathBuf>,
 }
 
 /// The runner's ports for one Windows guest, restored by `H`.
@@ -285,12 +290,31 @@ impl<H> WindowsGuest<H> {
         }
     }
 
-    /// Copies zebar's resources to where it resolves them from: Tauri spells the `../../resources` it names
-    /// as `_up_\_up_\resources` under the executable's directory.
+    /// Copies zebar, its resources to where it resolves them from, and its configuration when given: Tauri spells
+    /// the `../../resources` it names as `_up_\_up_\resources` under the executable's directory.
     fn deploy_zebar(&self, zebar: &ZebarBuild) -> Result<(), String> {
         self.ssh(r"New-Item -ItemType Directory -Force C:\vmtest\zebar\config, C:\vmtest\zebar\_up_\_up_ | Out-Null")?;
         self.scp(&[&zebar.executable], "C:/vmtest/zebar/")?;
-        self.scp(&[&zebar.resources], "C:/vmtest/zebar/_up_/_up_/")
+        self.scp(&[&zebar.resources], "C:/vmtest/zebar/_up_/_up_/")?;
+        let Some(config) = &zebar.config else {
+            return Ok(());
+        };
+        let entries = std::fs::read_dir(config)
+            .and_then(|entries| {
+                entries
+                    .map(|entry| entry.map(|e| e.path()))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .map_err(|error| {
+                format!(
+                    "cannot read zebar's configuration at {}: {error}",
+                    config.display()
+                )
+            })?;
+        self.scp(
+            &entries.iter().collect::<Vec<_>>(),
+            "C:/vmtest/zebar/config/",
+        )
     }
 
     fn set_display_power(&mut self, on: bool) -> Result<(), String> {
