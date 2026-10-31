@@ -20,6 +20,7 @@ Windowsゲストは、Windows 11 Proのインストールと、それに続く�
 
 - `.env`。`GUEST_PASSWORD=<パスワード>`で`fixture`のパスワードを書く。
 - `.secrets/id_ed25519`。ハーネスが接続に使う鍵で、その公開鍵を`oem/authorized_key.pub`にコピーする。
+- `.secrets/known_hosts`。ゲストのホスト鍵で、ハーネスが初めて接続したときに記録し、以後の接続のたびに照合する。再インストールするとゲストのホスト鍵が変わるので、このファイルからその行を消す必要がある。
 
 ## Hyper-Vで作り直す
 

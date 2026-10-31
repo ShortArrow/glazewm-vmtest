@@ -141,8 +141,8 @@ impl<H> WindowsGuest<H> {
 
     /// Options shared by ssh and scp.
     ///
-    /// The guest's host key changes with every reinstall, so it is not checked; it is recorded beside the key,
-    /// because Windows OpenSSH treats `UserKnownHostsFile=NUL` as a file named NUL in the working directory.
+    /// The guest's host key is trusted the first time it is seen and must match afterwards; a restore keeps it, and a
+    /// reinstall changes it, after which its line in `known_hosts` beside the key has to be removed.
     fn ssh_options(&self) -> Vec<String> {
         let known_hosts = self.config.ssh_key.with_file_name("known_hosts");
         vec![
@@ -150,7 +150,7 @@ impl<H> WindowsGuest<H> {
             "-o".into(),
             "BatchMode=yes".into(),
             "-o".into(),
-            "StrictHostKeyChecking=no".into(),
+            "StrictHostKeyChecking=accept-new".into(),
             "-o".into(),
             format!("UserKnownHostsFile={}", known_hosts.display()),
             "-o".into(),
@@ -312,6 +312,9 @@ impl<H> GuestExecutor for WindowsGuest<H> {
                 }
             },
         )?;
+        if let Some(forward) = self.daemon_forward.as_mut() {
+            forward_holds_its_address(forward)?;
+        }
         self.daemon = Some(daemon);
         Ok(())
     }
@@ -505,6 +508,17 @@ pub(crate) fn run(command: &mut Command) -> Result<(), String> {
     }
 }
 
+/// Whether `forward`, an ssh started with `ExitOnForwardFailure`, is still running and so bound the forwarded address.
+fn forward_holds_its_address(forward: &mut Child) -> Result<(), String> {
+    match forward.try_wait() {
+        Ok(None) => Ok(()),
+        Ok(Some(status)) => Err(format!(
+            "the SSH port forward to the guest daemon exited ({status}), so another process may hold its address"
+        )),
+        Err(error) => Err(format!("cannot check the SSH port forward: {error}")),
+    }
+}
+
 /// Retries `attempt` every second until it succeeds or `deadline` passes, returning the last error.
 fn poll<T>(
     deadline: Duration,
@@ -555,6 +569,30 @@ mod tests {
             .get_args()
             .map(|argument| argument.to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[test]
+    fn trusts_the_guests_host_key_on_first_use_and_refuses_a_different_one_later() {
+        let options = guest(None).ssh_options();
+
+        assert!(
+            options
+                .windows(2)
+                .any(|pair| pair == ["-o", "StrictHostKeyChecking=accept-new"]),
+            "{options:?}"
+        );
+    }
+
+    #[test]
+    fn a_forward_whose_ssh_has_exited_does_not_hold_the_daemon_address() {
+        let mut exited = Command::new("ssh")
+            .arg("-V")
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        exited.wait().unwrap();
+
+        assert!(forward_holds_its_address(&mut exited).is_err());
     }
 
     #[test]
