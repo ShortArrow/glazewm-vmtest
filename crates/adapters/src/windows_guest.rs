@@ -394,6 +394,7 @@ impl<H> GuestExecutor for WindowsGuest<H> {
 
 impl<H> DisplayController for WindowsGuest<H> {
     fn set_virtual_monitor_count(&mut self, count: u32) -> Result<(), String> {
+        settable_virtual_monitor_count(count)?;
         self.ssh(&format!(
             "$p = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'MTTVirtualDisplayPipe', 'InOut'); \
              $p.Connect(5000); $b = [Text.Encoding]::Unicode.GetBytes('SETDISPLAYCOUNT {count}'); \
@@ -583,6 +584,15 @@ fn wait_until_forwarding(
 }
 
 /// Succeeds when the OS shows `count` displays driven by the virtual display driver among `displays`.
+/// The virtual display driver stops working when asked for no monitors, until the guest is restored.
+fn settable_virtual_monitor_count(count: u32) -> Result<(), String> {
+    if count == 0 {
+        Err("the virtual display driver fails when asked for no monitors; remove the virtual monitors instead".into())
+    } else {
+        Ok(())
+    }
+}
+
 fn virtual_monitors_in_place(displays: &[DisplayDto], count: u32) -> Result<(), String> {
     let shown = displays
         .iter()
@@ -671,6 +681,19 @@ mod tests {
         ];
 
         assert_eq!(virtual_monitors_in_place(&shown, 1), Ok(()));
+    }
+
+    #[test]
+    fn refuses_to_ask_the_driver_for_no_virtual_monitors() {
+        assert_eq!(
+            settable_virtual_monitor_count(0),
+            Err("the virtual display driver fails when asked for no monitors; remove the virtual monitors instead".into())
+        );
+    }
+
+    #[test]
+    fn asks_the_driver_for_one_virtual_monitor_or_more() {
+        assert_eq!(settable_virtual_monitor_count(1), Ok(()));
     }
 
     #[test]
