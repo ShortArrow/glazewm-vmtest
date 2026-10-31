@@ -13,7 +13,8 @@ use vmtest_domain::scenario::{
 use vmtest_domain::topology::Rect;
 use vmtest_guest_client::GuestDaemonClient;
 use vmtest_protocol::{
-    GlazewmQuery, LoadKindDto, PresenceDto, RectDto, Request, Response, SutProgram, TestWindowDto,
+    DisplayDto, GlazewmQuery, LoadKindDto, PresenceDto, RectDto, Request, Response, SutProgram,
+    TestWindowDto,
 };
 use vmtest_runner::{
     Clock, DisplayController, GuestExecutor, Hypervisor, Observer, WorkloadController,
@@ -54,7 +55,11 @@ pub struct WindowsGuest<H> {
     daemon_forward: Option<Child>,
 }
 
-const VIRTUAL_DISPLAY: &str = "Get-PnpDevice -FriendlyName 'Virtual Display Driver'";
+/// The name the virtual display driver gives its device and its display adapter.
+const VIRTUAL_DISPLAY_DRIVER: &str = "Virtual Display Driver";
+
+/// How long the guest OS may take to show the virtual monitors the driver was asked for.
+const VIRTUAL_MONITORS_LIMIT: Duration = Duration::from_secs(30);
 
 /// How long one connect, read, or write to the guest daemon may take.
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
@@ -182,6 +187,14 @@ impl<H> WindowsGuest<H> {
             self.daemon = None;
         }
         response
+    }
+
+    /// The displays the guest OS shows in the interactive session.
+    fn displays(&mut self) -> Result<Vec<DisplayDto>, String> {
+        match self.request(&Request::Topology)? {
+            Response::Topology { displays } => Ok(displays),
+            other => Err(format!("unexpected answer to topology: {other:?}")),
+        }
     }
 
     /// Queries glazewm's monitors, telling the test windows among its windows apart by `test_windows`,
@@ -355,20 +368,22 @@ impl<H> DisplayController for WindowsGuest<H> {
             "$p = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'MTTVirtualDisplayPipe', 'InOut'); \
              $p.Connect(5000); $b = [Text.Encoding]::Unicode.GetBytes('SETDISPLAYCOUNT {count}'); \
              $p.Write($b, 0, $b.Length); $p.Flush(); Start-Sleep -Milliseconds 500; $p.Dispose()"
-        ))
-        .map(|_| ())
+        ))?;
+        poll(VIRTUAL_MONITORS_LIMIT, "the virtual monitors", || {
+            virtual_monitors_in_place(&self.displays()?, count)
+        })
     }
 
     fn remove_virtual_monitors(&mut self) -> Result<(), String> {
         self.ssh(&format!(
-            "{VIRTUAL_DISPLAY} | Disable-PnpDevice -Confirm:$false"
+            "Get-PnpDevice -FriendlyName '{VIRTUAL_DISPLAY_DRIVER}' | Disable-PnpDevice -Confirm:$false"
         ))
         .map(|_| ())
     }
 
     fn restore_virtual_monitors(&mut self) -> Result<(), String> {
         self.ssh(&format!(
-            "{VIRTUAL_DISPLAY} | Enable-PnpDevice -Confirm:$false"
+            "Get-PnpDevice -FriendlyName '{VIRTUAL_DISPLAY_DRIVER}' | Enable-PnpDevice -Confirm:$false"
         ))
         .map(|_| ())
     }
@@ -437,13 +452,11 @@ impl<H> WorkloadController for WindowsGuest<H> {
 
 impl<H> Observer for WindowsGuest<H> {
     fn observe(&mut self, ipc_limit: Duration) -> Result<Observation, String> {
-        let os_displays = match self.request(&Request::Topology)? {
-            Response::Topology { displays } => displays
-                .iter()
-                .map(|display| rect(display.bounds))
-                .collect(),
-            other => return Err(format!("unexpected answer to topology: {other:?}")),
-        };
+        let os_displays = self
+            .displays()?
+            .iter()
+            .map(|display| rect(display.bounds))
+            .collect();
         let test_windows = self.test_windows()?;
         let handles: Vec<_> = test_windows
             .iter()
@@ -539,6 +552,19 @@ fn wait_until_forwarding(
     ))
 }
 
+/// Succeeds when the OS shows `count` displays driven by the virtual display driver among `displays`.
+fn virtual_monitors_in_place(displays: &[DisplayDto], count: u32) -> Result<(), String> {
+    let shown = displays
+        .iter()
+        .filter(|display| display.adapter == VIRTUAL_DISPLAY_DRIVER)
+        .count();
+    if shown == count as usize {
+        Ok(())
+    } else {
+        Err(format!("the OS shows {shown} of {count} virtual monitors"))
+    }
+}
+
 /// Retries `attempt` every second until it succeeds or `deadline` passes, returning the last error.
 fn poll<T>(
     deadline: Duration,
@@ -589,6 +615,45 @@ mod tests {
             .get_args()
             .map(|argument| argument.to_string_lossy().into_owned())
             .collect()
+    }
+
+    fn display(adapter: &str) -> DisplayDto {
+        let rect = RectDto {
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 600,
+        };
+        DisplayDto {
+            device_name: String::new(),
+            adapter: adapter.into(),
+            bounds: rect,
+            working_area: rect,
+            is_primary: false,
+        }
+    }
+
+    #[test]
+    fn the_virtual_monitors_are_in_place_when_the_os_shows_that_many_of_the_drivers_displays() {
+        let shown = [
+            display("Microsoft Hyper-V Video"),
+            display("Virtual Display Driver"),
+        ];
+
+        assert_eq!(virtual_monitors_in_place(&shown, 1), Ok(()));
+    }
+
+    #[test]
+    fn the_virtual_monitors_are_not_in_place_while_the_os_shows_fewer_of_the_drivers_displays() {
+        let shown = [
+            display("Microsoft Hyper-V Video"),
+            display("Virtual Display Driver"),
+        ];
+
+        assert_eq!(
+            virtual_monitors_in_place(&shown, 3),
+            Err("the OS shows 1 of 3 virtual monitors".into())
+        );
     }
 
     #[test]

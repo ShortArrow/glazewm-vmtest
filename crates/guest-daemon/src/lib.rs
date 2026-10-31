@@ -598,6 +598,7 @@ mod tests {
         };
         vec![DisplayDto {
             device_name: "\\\\.\\DISPLAY1".into(),
+            adapter: "Microsoft Hyper-V Video".into(),
             bounds: rect,
             working_area: rect,
             is_primary: true,

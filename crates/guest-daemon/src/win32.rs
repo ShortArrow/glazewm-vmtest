@@ -6,7 +6,8 @@ use vmtest_protocol::{DisplayDto, PresenceDto, RectDto};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
-    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW,
+    DISPLAY_DEVICEW, EnumDisplayDevicesW, EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR,
+    MONITORINFOEXW,
 };
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
@@ -74,12 +75,34 @@ fn describe(monitor: HMONITOR) -> Result<DisplayDto, String> {
     if !read.as_bool() {
         return Err("GetMonitorInfoW failed".into());
     }
+    let device_name = utf16_until_nul(&info.szDevice);
     Ok(DisplayDto {
-        device_name: utf16_until_nul(&info.szDevice),
+        adapter: adapter_of(&device_name)?,
+        device_name,
         bounds: rect(info.monitorInfo.rcMonitor),
         working_area: rect(info.monitorInfo.rcWork),
         is_primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
     })
+}
+
+/// The description of the display adapter whose output is `device_name`, such as `\\.\DISPLAY1`.
+fn adapter_of(device_name: &str) -> Result<String, String> {
+    let mut index = 0;
+    loop {
+        let mut device = DISPLAY_DEVICEW {
+            cb: size_of::<DISPLAY_DEVICEW>() as u32,
+            ..Default::default()
+        };
+        // SAFETY: `device` is a correctly sized `DISPLAY_DEVICEW`, as `cb` declares.
+        let found = unsafe { EnumDisplayDevicesW(None, index, &mut device, 0) };
+        if !found.as_bool() {
+            return Err(format!("no display adapter has the output {device_name}"));
+        }
+        if utf16_until_nul(&device.DeviceName) == device_name {
+            return Ok(utf16_until_nul(&device.DeviceString));
+        }
+        index += 1;
+    }
 }
 
 fn rect(r: RECT) -> RectDto {

@@ -139,6 +139,8 @@ pub struct RectDto {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DisplayDto {
     pub device_name: String,
+    /// The display adapter that drives it, as `EnumDisplayDevices` names it.
+    pub adapter: String,
     pub bounds: RectDto,
     pub working_area: RectDto,
     pub is_primary: bool,
@@ -262,6 +264,7 @@ mod tests {
         let response = Response::Topology {
             displays: vec![DisplayDto {
                 device_name: "\\\\.\\DISPLAY2".into(),
+                adapter: "Virtual Display Driver".into(),
                 bounds: rect,
                 working_area: rect,
                 is_primary: false,

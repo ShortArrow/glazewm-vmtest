@@ -31,6 +31,7 @@ pub trait GuestExecutor {
 
 /// Changes the guest's monitors.
 pub trait DisplayController {
+    /// Sets how many virtual monitors the guest has and returns once the guest OS shows that many.
     fn set_virtual_monitor_count(&mut self, count: u32) -> Result<(), String>;
     fn remove_virtual_monitors(&mut self) -> Result<(), String>;
     fn restore_virtual_monitors(&mut self) -> Result<(), String>;
