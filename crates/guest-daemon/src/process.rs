@@ -1,11 +1,13 @@
-//! Runs the SUT's command-line client as a child process.
+//! Runs the SUT programs and the SUT's command-line client as child processes.
 
 use std::fs::File;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+use vmtest_protocol::SutProgram;
 
 use crate::{CliOutcome, CommandOutput, GlazewmCli};
 
@@ -14,35 +16,64 @@ pub struct ProcessGlazewmCli {
     pub executable: PathBuf,
 }
 
-/// Starts glazewm from a fixed directory, with the `config.yaml` there, writing its output to
-/// `stdout.log` and `stderr.log` there.
-pub struct ProcessGlazewm {
-    pub directory: PathBuf,
+/// A SUT program the harness deployed into a directory named after it: glazewm with the `config.yaml` there,
+/// zebar with the `config` directory there. Started, it writes its output to `stdout.log` and `stderr.log` there,
+/// with a backtrace if it panics.
+pub struct DeployedSut {
+    directory: PathBuf,
+    program: SutProgram,
 }
 
-impl ProcessGlazewm {
-    pub fn executable(&self) -> PathBuf {
-        self.directory.join("glazewm.exe")
+impl DeployedSut {
+    /// The `program` deployed under `base`.
+    pub fn new(base: &Path, program: SutProgram) -> Self {
+        let name = match program {
+            SutProgram::Glazewm => "glazewm",
+            SutProgram::Zebar => "zebar",
+        };
+        Self {
+            directory: base.join(name),
+            program,
+        }
     }
 
-    /// Starts glazewm and returns once its process exists, leaving it running.
+    pub fn executable(&self) -> PathBuf {
+        self.directory.join(match self.program {
+            SutProgram::Glazewm => "glazewm.exe",
+            SutProgram::Zebar => "zebar.exe",
+        })
+    }
+
+    fn command(&self) -> Command {
+        let mut command = Command::new(self.executable());
+        match self.program {
+            SutProgram::Glazewm => command
+                .arg("start")
+                .arg("--config")
+                .arg(self.directory.join("config.yaml")),
+            SutProgram::Zebar => command
+                .arg("startup")
+                .arg("--config-dir")
+                .arg(self.directory.join("config")),
+        };
+        command
+            .current_dir(&self.directory)
+            .env("RUST_BACKTRACE", "1");
+        without_window(&mut command);
+        command
+    }
+
+    /// Starts the program and returns once its process exists, leaving it running.
     pub fn start(&self) -> Result<(), String> {
         let log = |name: &str| {
             let path = self.directory.join(name);
             File::create(&path)
                 .map_err(|error| format!("cannot create {}: {error}", path.display()))
         };
-        let mut command = Command::new(self.executable());
-        command
-            .arg("start")
-            .arg("--config")
-            .arg(self.directory.join("config.yaml"))
-            .current_dir(&self.directory)
+        self.command()
             .stdin(Stdio::null())
             .stdout(log("stdout.log")?)
-            .stderr(log("stderr.log")?);
-        without_window(&mut command);
-        command
+            .stderr(log("stderr.log")?)
             .spawn()
             .map(drop)
             .map_err(|error| format!("cannot start {}: {error}", self.executable().display()))
@@ -133,6 +164,46 @@ mod tests {
             &["-NoProfile".into(), "-Command".into(), script.into()],
             limit,
         )
+    }
+
+    fn arguments(command: &Command) -> Vec<String> {
+        command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn starts_glazewm_with_the_configuration_file_beside_it() {
+        let command = DeployedSut::new(Path::new(r"C:\vmtest"), SutProgram::Glazewm).command();
+
+        assert_eq!(command.get_program(), r"C:\vmtest\glazewm\glazewm.exe");
+        assert_eq!(
+            arguments(&command),
+            ["start", "--config", r"C:\vmtest\glazewm\config.yaml"]
+        );
+    }
+
+    #[test]
+    fn starts_zebar_with_the_configuration_directory_beside_it() {
+        let command = DeployedSut::new(Path::new(r"C:\vmtest"), SutProgram::Zebar).command();
+
+        assert_eq!(command.get_program(), r"C:\vmtest\zebar\zebar.exe");
+        assert_eq!(
+            arguments(&command),
+            ["startup", "--config-dir", r"C:\vmtest\zebar\config"]
+        );
+    }
+
+    #[test]
+    fn a_sut_that_panics_writes_a_backtrace() {
+        let command = DeployedSut::new(Path::new(r"C:\vmtest"), SutProgram::Zebar).command();
+
+        assert!(
+            command
+                .get_envs()
+                .any(|(name, value)| name == "RUST_BACKTRACE" && value == Some("1".as_ref()))
+        );
     }
 
     #[test]

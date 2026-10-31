@@ -66,6 +66,7 @@ pub enum Request {
 #[serde(rename_all = "snake_case")]
 pub enum SutProgram {
     Glazewm,
+    Zebar,
 }
 
 /// The `glazewm-cli query` subjects the runner reads.
@@ -329,6 +330,19 @@ mod tests {
         assert_eq!(
             encode_line(&request),
             "{\"type\":\"start_sut\",\"program\":\"glazewm\"}
+"
+        );
+    }
+
+    #[test]
+    fn names_zebar_as_a_sut_program() {
+        let request = Request::StartSut {
+            program: SutProgram::Zebar,
+        };
+
+        assert_eq!(
+            encode_line(&request),
+            "{\"type\":\"start_sut\",\"program\":\"zebar\"}
 "
         );
     }

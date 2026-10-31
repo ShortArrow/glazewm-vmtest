@@ -44,6 +44,16 @@ pub struct GuestConfig {
     /// Directory holding glazewm.exe, glazewm-cli.exe and glazewm-watcher.exe.
     pub glazewm_build: PathBuf,
     pub glazewm_config: PathBuf,
+    /// The zebar to deploy and start beside glazewm; `None` deploys no zebar.
+    pub zebar: Option<ZebarBuild>,
+}
+
+/// A zebar built from its repository: the executable, with the settings UI built into it, and the repository's
+/// `resources` directory, which it reads its starter widgets and templates from at run time.
+#[derive(Clone, Debug)]
+pub struct ZebarBuild {
+    pub executable: PathBuf,
+    pub resources: PathBuf,
 }
 
 /// The runner's ports for one Windows guest, restored by `H`.
@@ -76,6 +86,11 @@ impl<H> WindowsGuest<H> {
         }
     }
 
+    pub fn with_zebar(mut self, zebar: ZebarBuild) -> Self {
+        self.config.zebar = Some(zebar);
+        self
+    }
+
     fn ssh(&self, command: &str) -> Result<String, String> {
         let output = Command::new("ssh")
             .args(self.ssh_options())
@@ -99,6 +114,7 @@ impl<H> WindowsGuest<H> {
             .args(self.ssh_options())
             .arg("-P")
             .arg(self.config.ssh_port.to_string())
+            .arg("-r")
             .args(sources.iter().map(|source| source.as_os_str()))
             .arg(format!("{}:{destination}", self.ssh_destination())))
     }
@@ -260,6 +276,23 @@ impl<H> WindowsGuest<H> {
         }
     }
 
+    fn start(&mut self, program: SutProgram) -> Result<(), String> {
+        match self.request(&Request::StartSut { program })? {
+            Response::SutStarted { program: started } if started == program => Ok(()),
+            other => Err(format!(
+                "unexpected answer to starting {program:?}: {other:?}"
+            )),
+        }
+    }
+
+    /// Copies zebar's resources to where it resolves them from: Tauri spells the `../../resources` it names
+    /// as `_up_\_up_\resources` under the executable's directory.
+    fn deploy_zebar(&self, zebar: &ZebarBuild) -> Result<(), String> {
+        self.ssh(r"New-Item -ItemType Directory -Force C:\vmtest\zebar\config, C:\vmtest\zebar\_up_\_up_ | Out-Null")?;
+        self.scp(&[&zebar.executable], "C:/vmtest/zebar/")?;
+        self.scp(&[&zebar.resources], "C:/vmtest/zebar/_up_/_up_/")
+    }
+
     fn glazewm_is_running(&mut self) -> Result<bool, String> {
         let request = Request::SutRunning {
             program: SutProgram::Glazewm,
@@ -347,14 +380,15 @@ impl<H> GuestExecutor for WindowsGuest<H> {
             &[&self.config.glazewm_config.clone()],
             "C:/vmtest/glazewm/config.yaml",
         )?;
-        let program = SutProgram::Glazewm;
-        match self.request(&Request::StartSut { program })? {
-            Response::SutStarted { program: started } if started == program => {}
-            other => return Err(format!("unexpected answer to starting glazewm: {other:?}")),
-        }
+        self.start(SutProgram::Glazewm)?;
         poll(Duration::from_secs(60), "glazewm to take a query", || {
             self.query_glazewm_monitors(ipc_limit, &[]).map(|_| ())
-        })
+        })?;
+        if let Some(zebar) = self.config.zebar.clone() {
+            self.deploy_zebar(&zebar)?;
+            self.start(SutProgram::Zebar)?;
+        }
+        Ok(())
     }
 }
 
@@ -600,6 +634,7 @@ mod tests {
                 daemon_limits: None,
                 glazewm_build: PathBuf::new(),
                 glazewm_config: PathBuf::new(),
+                zebar: None,
             },
             (),
         )

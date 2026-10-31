@@ -1,7 +1,8 @@
 //! Entry point of the guest daemon: `vmtest-guest-daemon [listen-address]`, default `0.0.0.0:7041`.
 //!
-//! The SUT is expected at `glazewm\glazewm.exe`, its configuration at `glazewm\config.yaml` and its client at
-//! `glazewm\glazewm-cli.exe` beside the daemon's executable,
+//! The SUT is expected beside the daemon's executable: glazewm at `glazewm\glazewm.exe`, its configuration at
+//! `glazewm\config.yaml` and its client at `glazewm\glazewm-cli.exe`, and zebar at `zebar\zebar.exe` with its
+//! configuration directory at `zebar\config`;
 //! the Win32 test-window application at `vmtest-test-window-win32.exe` beside it, and the load generator
 //! at `vmtest-load.exe`. Limits on requests
 //! are read from `guest-daemon.json` beside it if that file exists; the daemon does not start if it is invalid.
@@ -17,7 +18,7 @@ fn main() -> std::io::Result<()> {
     use std::sync::Arc;
     use vmtest_guest_daemon::limits::Limits;
     use vmtest_guest_daemon::load::LoadProcesses;
-    use vmtest_guest_daemon::process::{ProcessGlazewm, ProcessGlazewmCli};
+    use vmtest_guest_daemon::process::{DeployedSut, ProcessGlazewmCli};
     use vmtest_guest_daemon::test_windows::Batch;
     use vmtest_guest_daemon::test_windows::LaunchedApp;
     use vmtest_guest_daemon::win32::{self, Win32Topology};
@@ -28,7 +29,8 @@ fn main() -> std::io::Result<()> {
 
     struct LiveGuest {
         cli: ProcessGlazewmCli,
-        glazewm: ProcessGlazewm,
+        glazewm: DeployedSut,
+        zebar: DeployedSut,
         test_windows: LaunchedApp,
         loads: LoadProcesses,
     }
@@ -78,17 +80,22 @@ fn main() -> std::io::Result<()> {
         }
     }
 
+    impl LiveGuest {
+        fn sut(&self, program: SutProgram) -> &DeployedSut {
+            match program {
+                SutProgram::Glazewm => &self.glazewm,
+                SutProgram::Zebar => &self.zebar,
+            }
+        }
+    }
+
     impl SutProcesses for LiveGuest {
         fn is_running(&self, program: SutProgram) -> Result<bool, String> {
-            match program {
-                SutProgram::Glazewm => win32::image_is_running(&self.glazewm.executable()),
-            }
+            win32::image_is_running(&self.sut(program).executable())
         }
 
         fn start(&self, program: SutProgram) -> Result<(), String> {
-            match program {
-                SutProgram::Glazewm => self.glazewm.start(),
-            }
+            self.sut(program).start()
         }
     }
 
@@ -133,14 +140,12 @@ fn main() -> std::io::Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Limits::default(),
         Err(error) => return Err(error),
     };
-    let sut = directory.join("glazewm");
     let guest = Arc::new(LiveGuest {
         cli: ProcessGlazewmCli {
-            executable: sut.join("glazewm-cli.exe"),
+            executable: directory.join("glazewm").join("glazewm-cli.exe"),
         },
-        glazewm: ProcessGlazewm {
-            directory: sut.clone(),
-        },
+        glazewm: DeployedSut::new(&directory, SutProgram::Glazewm),
+        zebar: DeployedSut::new(&directory, SutProgram::Zebar),
         test_windows: LaunchedApp::new(directory.join("vmtest-test-window-win32.exe"), limits),
         loads: LoadProcesses::new(directory.join("vmtest-load.exe")),
     });
