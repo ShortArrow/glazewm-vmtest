@@ -1,7 +1,7 @@
 # 発見: 仮想モニターが戻るときにWindowsがタイル配置中のウィンドウを最小化し、glazewmが最小化のままにする
 
 - 日付: 2026-10-31
-- 状態: 未解決。引き金は分かったが、glazewmは変更していない
+- 状態: ../glazewmの`fix/restore-windows-minimized-by-display-change`（`d43f1d1c`）で修正し、`vmtest/all-fixes`（`2f4ff441`）にマージした。upstreamには報告していない
 - SUT: glazewm `5709ad0a`。設定はサンプルから起動時と終了時のコマンドを除いたもの
 - ゲスト: Hyper-V上のdocs/GUEST-IMAGE.jp.mdのチェックポイント`daemon-task`。ディスプレイはHyper-Vの合成ディスプレイ（1280×800）とVirtual Display Driver。Windows 11 ビルド26300
 
@@ -25,7 +25,13 @@ Windows 11は、`MonitorRemovalRecalcBehavior`（DWORD、`HKCU\Control Panel\Des
 
 この値を1にしたゲストの複製で同じシナリオを15回実行すると、すべてベースラインと一致し、glazewmは最小化を記録しなかった。7回中2回最小化するなら、15回続けて最小化しない確率は1%未満である。
 
-## 未解決の点
+## 修正
+
+`fix/restore-windows-minimized-by-display-change`は、ディスプレイの変化の前後5秒以内の最小化をOSによるものとみなし、ウィンドウを前の状態に戻す。その5秒の間に利用者が自分で最小化した場合も元に戻る。
+
+最初の版はディスプレイの変化の後の最小化だけを見ており、15回中4回でウィンドウが最小化のまま残った。それらの回では、glazewmはディスプレイの変化の0.07〜0.19秒前に最小化を知っていた。前後どちらの順序も見るようにした版では、Windowsの既定のままのゲストで15回実行し、ウィンドウが最小化されたのは2回だった。glazewmはその2回とも`Window minimized by a display change, restoring`を記録し、最小化のまま残ったウィンドウはなかった。
+
+## 発見時に未解決だった点
 
 - glazewmは、OSが報告する最小化をすべて利用者の操作として扱う。そのため、Windowsがディスプレイの変化のために最小化したウィンドウも、タイル配置から外したままにする。glazewmがこの2つを区別すべきか（例えば、ディスプレイの変化の最中にOSが最小化したウィンドウを元に戻す）は決まっていない。
 - Windowsが、glazewmがウィンドウを残ったディスプレイに移した後、仮想モニターが戻るときになって最小化した理由と、それが一部の実行でだけ起きる理由。
