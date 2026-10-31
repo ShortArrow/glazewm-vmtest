@@ -30,7 +30,7 @@ The harness replaces that manual work with virtualization-platform operations, s
 
 | ID | Trigger | Example |
 |---|---|---|
-| UC-1 | Monitor added or removed | 1 → 3 → 2 monitors; removing only the middle one |
+| UC-1 | Monitor added or removed | 1 → 3 → 2 monitors; removing only the middle one. Each the way a monitor leaves a user's desk: its cable pulled; a dock taking several monitors at once and returning them seconds apart, before the SUT has settled; the display turned off, so that only its power state changes |
 | UC-2 | Display settings changed | Resolution, scaling, arrangement, primary monitor |
 | UC-3 | RDP session changes | Connect, disconnect, reconnect from a client with a different monitor count or resolution |
 | UC-4 | VNC client changes | Connect and disconnect; that the guest topology does *not* change is also under test |
