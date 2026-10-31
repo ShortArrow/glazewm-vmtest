@@ -125,7 +125,10 @@ impl<H> WindowsGuest<H> {
                 .map_err(|error| format!("cannot start the SSH port forward: {error}"))?;
             let stderr = forward.stderr.take().map(BufReader::new);
             self.daemon_forward = Some(forward);
-            wait_until_forwarding(stderr.expect("stderr is piped"))?;
+            wait_until_forwarding(
+                stderr.expect("stderr is piped"),
+                &self.config.daemon_address,
+            )?;
         }
         Ok(())
     }
@@ -510,12 +513,21 @@ pub(crate) fn run(command: &mut Command) -> Result<(), String> {
 
 /// Reads the `-v` output of an ssh started with `ExitOnForwardFailure` until it reports listening on the forwarded
 /// address, so that no other process holds that address when the runner connects to it, then keeps draining it.
-fn wait_until_forwarding(stderr: impl BufRead + Send + 'static) -> Result<(), String> {
+///
+/// Only ssh's own report for `address` counts, never text the guest sends that resembles it.
+fn wait_until_forwarding(
+    stderr: impl BufRead + Send + 'static,
+    address: &str,
+) -> Result<(), String> {
+    let (host, port) = address
+        .rsplit_once(':')
+        .ok_or_else(|| format!("the daemon address {address} has no port"))?;
+    let report = format!("debug1: Local forwarding listening on {host} port {port}.");
     let mut lines = stderr.lines();
     let mut last = String::new();
     for line in lines.by_ref() {
         let line = line.map_err(|error| format!("cannot read the SSH port forward: {error}"))?;
-        if line.contains("Local forwarding listening on") {
+        if line.trim_end() == report {
             std::thread::spawn(move || lines.for_each(drop));
             return Ok(());
         }
@@ -598,7 +610,19 @@ mod tests {
             debug1: Local forwarding listening on 127.0.0.1 port 17041.\r\n\
             debug1: channel 0: new port-listener\r\n";
 
-        assert_eq!(wait_until_forwarding(&stderr[..]), Ok(()));
+        assert_eq!(
+            wait_until_forwarding(&stderr[..], "127.0.0.1:17041"),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn text_from_the_guest_that_resembles_the_report_is_not_taken_for_it() {
+        let stderr = b"debug1: Remote: Local forwarding listening on 127.0.0.1 port 17041.\r\n\
+            Local forwarding listening on 127.0.0.1 port 17041.\r\n\
+            debug1: Local forwarding listening on 127.0.0.1 port 27041.\r\n";
+
+        assert!(wait_until_forwarding(&stderr[..], "127.0.0.1:17041").is_err());
     }
 
     #[test]
@@ -607,7 +631,7 @@ mod tests {
             bind [127.0.0.1]:17041: Address already in use\r\n\
             Could not request local forwarding.\r\n";
 
-        let error = wait_until_forwarding(&stderr[..]).unwrap_err();
+        let error = wait_until_forwarding(&stderr[..], "127.0.0.1:17041").unwrap_err();
 
         assert!(
             error.contains("Could not request local forwarding."),
