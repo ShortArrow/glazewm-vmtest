@@ -90,7 +90,7 @@ where
     let mut loads = ActiveLoads::default();
     let mut outcomes = vec![settled_outcome(scenario, &loads, guest, clock, settle)?];
     for step in &scenario.steps {
-        apply(step, guest)?;
+        apply(step, guest, clock)?;
         loads.apply(step);
         outcomes.push(settled_outcome(scenario, &loads, guest, clock, settle)?);
     }
@@ -100,9 +100,19 @@ where
 fn apply(
     step: &Step,
     guest: &mut (impl DisplayController + WorkloadController),
+    clock: &mut dyn Clock,
 ) -> Result<(), String> {
     match step {
         Step::SetVirtualMonitorCount(count) => guest.set_virtual_monitor_count(*count),
+        Step::SetVirtualMonitorCounts { counts, apart } => {
+            for (index, count) in counts.iter().enumerate() {
+                if index > 0 {
+                    clock.sleep(*apart);
+                }
+                guest.set_virtual_monitor_count(*count)?;
+            }
+            Ok(())
+        }
         Step::RemoveVirtualMonitors => guest.remove_virtual_monitors(),
         Step::RestoreVirtualMonitors => guest.restore_virtual_monitors(),
         Step::OpenTestWindows(batch) => guest.open_test_windows(batch),
@@ -369,6 +379,42 @@ mod tests {
                 "set_virtual_monitor_count 3"
             ]
         );
+    }
+
+    fn run_quick_succession(apart: Duration) -> (Vec<String>, usize, Duration) {
+        let mut guest = FakeGuest::observing(vec![observed(3, 3)]);
+        let mut clock = FakeClock(Duration::ZERO);
+        let step = Step::SetVirtualMonitorCounts {
+            counts: vec![0, 1, 2],
+            apart,
+        };
+
+        let outcomes = run(&scenario(vec![step]), &mut guest, &mut clock, SETTLE).unwrap();
+
+        (guest.log, outcomes.len(), clock.0)
+    }
+
+    #[test]
+    fn sets_each_count_in_turn_and_settles_only_after_the_last() {
+        let (log, outcomes, _) = run_quick_succession(Duration::ZERO);
+
+        assert_eq!(
+            log[4..],
+            [
+                "set_virtual_monitor_count 0",
+                "set_virtual_monitor_count 1",
+                "set_virtual_monitor_count 2"
+            ]
+        );
+        assert_eq!(outcomes, 2);
+    }
+
+    #[test]
+    fn waits_the_given_time_between_counts_set_in_quick_succession() {
+        let (_, _, back_to_back) = run_quick_succession(Duration::ZERO);
+        let (_, _, spaced) = run_quick_succession(Duration::from_secs(3));
+
+        assert_eq!(spaced - back_to_back, Duration::from_secs(6));
     }
 
     #[test]

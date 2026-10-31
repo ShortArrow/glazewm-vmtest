@@ -10,6 +10,12 @@ use crate::topology::Rect;
 pub enum Step {
     /// Sets how many virtual monitors exist besides the platform's own display.
     SetVirtualMonitorCount(u32),
+    /// Sets the virtual monitor count to each of `counts` in turn, `apart` after the guest OS shows the one before,
+    /// as a dock does when it drops its monitors and brings them back; the SUT is not given time to settle in between.
+    SetVirtualMonitorCounts {
+        counts: Vec<u32>,
+        apart: Duration,
+    },
     /// Removes every virtual monitor at once.
     RemoveVirtualMonitors,
     /// Brings back the virtual monitors removed by `RemoveVirtualMonitors`.
