@@ -104,7 +104,6 @@ fn guest(name: &str, glazewm_config: &str) -> WindowsGuest<Platform> {
             .map(PathBuf::from)
             .unwrap_or_else(|| repository.join("target/sut/glazewm/release")),
         glazewm_config: glazewm_config_path,
-        start_glazewm_script: dockur.join("scripts/start-glazewm.ps1"),
     };
     match std::env::var("VMTEST_PLATFORM").as_deref() {
         Ok("hyperv") | Err(_) => WindowsGuest::with_hypervisor(

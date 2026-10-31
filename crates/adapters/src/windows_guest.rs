@@ -44,7 +44,6 @@ pub struct GuestConfig {
     /// Directory holding glazewm.exe, glazewm-cli.exe and glazewm-watcher.exe.
     pub glazewm_build: PathBuf,
     pub glazewm_config: PathBuf,
-    pub start_glazewm_script: PathBuf,
 }
 
 /// The runner's ports for one Windows guest, restored by `H`.
@@ -348,14 +347,11 @@ impl<H> GuestExecutor for WindowsGuest<H> {
             &[&self.config.glazewm_config.clone()],
             "C:/vmtest/glazewm/config.yaml",
         )?;
-        self.scp(&[&self.config.start_glazewm_script.clone()], "C:/vmtest/")?;
-        self.ssh(&format!(
-            "$a = New-ScheduledTaskAction -Execute powershell.exe -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\\vmtest\\start-glazewm.ps1'; \
-             $p = New-ScheduledTaskPrincipal -UserId {} -LogonType Interactive -RunLevel Limited; \
-             Register-ScheduledTask -TaskName vmtest-sut-glazewm -Action $a -Principal $p -Force | Out-Null; \
-             Start-ScheduledTask -TaskName vmtest-sut-glazewm",
-            self.config.user
-        ))?;
+        let program = SutProgram::Glazewm;
+        match self.request(&Request::StartSut { program })? {
+            Response::SutStarted { program: started } if started == program => {}
+            other => return Err(format!("unexpected answer to starting glazewm: {other:?}")),
+        }
         poll(Duration::from_secs(60), "glazewm to take a query", || {
             self.query_glazewm_monitors(ipc_limit, &[]).map(|_| ())
         })
@@ -604,7 +600,6 @@ mod tests {
                 daemon_limits: None,
                 glazewm_build: PathBuf::new(),
                 glazewm_config: PathBuf::new(),
-                start_glazewm_script: PathBuf::new(),
             },
             (),
         )

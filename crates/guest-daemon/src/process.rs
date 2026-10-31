@@ -1,5 +1,6 @@
 //! Runs the SUT's command-line client as a child process.
 
+use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -13,6 +14,53 @@ pub struct ProcessGlazewmCli {
     pub executable: PathBuf,
 }
 
+/// Starts glazewm from a fixed directory, with the `config.yaml` there, writing its output to
+/// `stdout.log` and `stderr.log` there.
+pub struct ProcessGlazewm {
+    pub directory: PathBuf,
+}
+
+impl ProcessGlazewm {
+    pub fn executable(&self) -> PathBuf {
+        self.directory.join("glazewm.exe")
+    }
+
+    /// Starts glazewm and returns once its process exists, leaving it running.
+    pub fn start(&self) -> Result<(), String> {
+        let log = |name: &str| {
+            let path = self.directory.join(name);
+            File::create(&path)
+                .map_err(|error| format!("cannot create {}: {error}", path.display()))
+        };
+        let mut command = Command::new(self.executable());
+        command
+            .arg("start")
+            .arg("--config")
+            .arg(self.directory.join("config.yaml"))
+            .current_dir(&self.directory)
+            .stdin(Stdio::null())
+            .stdout(log("stdout.log")?)
+            .stderr(log("stderr.log")?);
+        without_window(&mut command);
+        command
+            .spawn()
+            .map(drop)
+            .map_err(|error| format!("cannot start {}: {error}", self.executable().display()))
+    }
+}
+
+/// Keeps a console child of the windowless daemon from opening a console window on the desktop under test.
+fn without_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+}
+
 /// How often a running child is checked for having exited.
 const EXIT_POLL: Duration = Duration::from_millis(20);
 
@@ -24,13 +72,7 @@ impl GlazewmCli for ProcessGlazewmCli {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            /// `CREATE_NO_WINDOW`: a console child of a windowless daemon would otherwise open a console window on the desktop under test.
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
+        without_window(&mut command);
         let mut child = command
             .spawn()
             .map_err(|error| format!("cannot start {}: {error}", self.executable.display()))?;

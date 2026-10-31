@@ -17,6 +17,11 @@ pub enum Request {
         query: GlazewmQuery,
         limit_ms: u64,
     },
+    /// Starts the SUT program the harness deployed, with the configuration deployed beside it, in the
+    /// interactive session and without a window of its own; answers once the process exists.
+    StartSut {
+        program: SutProgram,
+    },
     /// Asks whether the SUT program the harness deployed is running in the guest.
     SutRunning {
         program: SutProgram,
@@ -96,6 +101,9 @@ pub enum Response {
     /// The command had not finished after `limit_ms`, measured in the guest, and was terminated.
     TimedOut {
         limit_ms: u64,
+    },
+    SutStarted {
+        program: SutProgram,
     },
     Running {
         running: bool,
@@ -310,6 +318,30 @@ mod tests {
             "{\"type\":\"sut_running\",\"program\":\"glazewm\"}
 "
         );
+    }
+
+    #[test]
+    fn asks_to_start_a_sut_program_by_name_only() {
+        let request = Request::StartSut {
+            program: SutProgram::Glazewm,
+        };
+
+        assert_eq!(
+            encode_line(&request),
+            "{\"type\":\"start_sut\",\"program\":\"glazewm\"}
+"
+        );
+    }
+
+    #[test]
+    fn a_started_answer_survives_a_round_trip() {
+        let response = Response::SutStarted {
+            program: SutProgram::Glazewm,
+        };
+
+        let decoded: Response = decode_line(&encode_line(&response)).unwrap();
+
+        assert_eq!(decoded, response);
     }
 
     #[test]

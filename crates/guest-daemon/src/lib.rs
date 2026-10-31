@@ -50,6 +50,8 @@ pub trait GlazewmCli {
 pub trait SutProcesses {
     /// Says whether `program`, as deployed by the harness, has a running process, or why that cannot be known.
     fn is_running(&self, program: SutProgram) -> Result<bool, String>;
+    /// Starts `program`, as deployed by the harness, with no window of its own, and returns once its process exists.
+    fn start(&self, program: SutProgram) -> Result<(), String>;
 }
 
 /// Opens test windows through a test-window application and reads where they are.
@@ -99,6 +101,10 @@ pub fn handle(request: Request, guest: &dyn Guest) -> Response {
                 Err(message) => Response::Error { message },
             }
         }
+        Request::StartSut { program } => match guest.start(program) {
+            Ok(()) => Response::SutStarted { program },
+            Err(message) => Response::Error { message },
+        },
         Request::SutRunning { program } => match guest.is_running(program) {
             Ok(running) => Response::Running { running },
             Err(message) => Response::Error { message },
@@ -190,6 +196,9 @@ mod tests {
 
     impl SutProcesses for FixedWindows {
         fn is_running(&self, _program: SutProgram) -> Result<bool, String> {
+            Err("no processes in this fake".into())
+        }
+        fn start(&self, _program: SutProgram) -> Result<(), String> {
             Err("no processes in this fake".into())
         }
     }
@@ -336,7 +345,8 @@ mod tests {
         );
     }
 
-    /// A guest in which glazewm's process is running or not, and topology and `glazewm-cli` are unused.
+    /// A guest in which glazewm's process is running or not, or starts or not, and topology and `glazewm-cli`
+    /// are unused.
     struct FixedProcesses(Result<bool, String>);
 
     impl TopologySource for FixedProcesses {
@@ -384,6 +394,41 @@ mod tests {
             assert_eq!(program, SutProgram::Glazewm);
             self.0.clone()
         }
+        fn start(&self, program: SutProgram) -> Result<(), String> {
+            assert_eq!(program, SutProgram::Glazewm);
+            self.0.clone().map(drop)
+        }
+    }
+
+    #[test]
+    fn starts_the_sut_program_and_answers_that_it_has_started() {
+        let request = Request::StartSut {
+            program: SutProgram::Glazewm,
+        };
+
+        assert_eq!(
+            handle(request, &FixedProcesses(Ok(true))),
+            Response::SutStarted {
+                program: SutProgram::Glazewm
+            }
+        );
+    }
+
+    #[test]
+    fn answers_with_an_error_when_the_sut_program_cannot_be_started() {
+        let request = Request::StartSut {
+            program: SutProgram::Glazewm,
+        };
+
+        assert_eq!(
+            handle(
+                request,
+                &FixedProcesses(Err("glazewm.exe not found".into()))
+            ),
+            Response::Error {
+                message: "glazewm.exe not found".into()
+            }
+        );
     }
 
     #[test]
@@ -422,6 +467,9 @@ mod tests {
 
     impl SutProcesses for FixedTopology {
         fn is_running(&self, _program: SutProgram) -> Result<bool, String> {
+            Err("no processes in this fake".into())
+        }
+        fn start(&self, _program: SutProgram) -> Result<(), String> {
             Err("no processes in this fake".into())
         }
     }
@@ -485,6 +533,9 @@ mod tests {
 
     impl SutProcesses for FakeCli {
         fn is_running(&self, _program: SutProgram) -> Result<bool, String> {
+            Err("no processes in this fake".into())
+        }
+        fn start(&self, _program: SutProgram) -> Result<(), String> {
             Err("no processes in this fake".into())
         }
     }
