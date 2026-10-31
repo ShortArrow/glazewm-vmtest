@@ -29,7 +29,7 @@ A copy of the guest with the value set to 1 ran the same scenario 15 times: ever
 
 `fix/restore-windows-minimized-by-display-change` takes a minimize within 5 seconds of a display change, in either order, as the OS's and restores the window to its previous state. A minimize the user makes within those 5 seconds is undone as well.
 
-The first version looked only at minimizes after a display change, and 4 of 15 runs still kept a window minimized: in those runs glazewm learned of the minimize 0.07 to 0.19 seconds before the display change. With both orders, 15 runs on the guest with Windows' default minimized a window in 2 runs, glazewm logged `Window minimized by a display change, restoring` for each, and no window stayed minimized.
+The first version looked only at minimizes after a display change, and 4 of 15 runs still kept a window minimized: in those runs glazewm learned of the minimize 0.07 to 0.23 seconds before the display change. With both orders, 15 runs on the guest with Windows' default minimized a window in 2 runs, glazewm logged `Window minimized by a display change, restoring` for each, and no window stayed minimized.
 
 ## Open when found
 

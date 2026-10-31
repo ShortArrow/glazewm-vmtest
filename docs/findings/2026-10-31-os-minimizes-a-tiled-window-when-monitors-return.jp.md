@@ -29,7 +29,7 @@ Windows 11は、`MonitorRemovalRecalcBehavior`（DWORD、`HKCU\Control Panel\Des
 
 `fix/restore-windows-minimized-by-display-change`は、ディスプレイの変化の前後5秒以内の最小化をOSによるものとみなし、ウィンドウを前の状態に戻す。その5秒の間に利用者が自分で最小化した場合も元に戻る。
 
-最初の版はディスプレイの変化の後の最小化だけを見ており、15回中4回でウィンドウが最小化のまま残った。それらの回では、glazewmはディスプレイの変化の0.07〜0.19秒前に最小化を知っていた。前後どちらの順序も見るようにした版では、Windowsの既定のままのゲストで15回実行し、ウィンドウが最小化されたのは2回だった。glazewmはその2回とも`Window minimized by a display change, restoring`を記録し、最小化のまま残ったウィンドウはなかった。
+最初の版はディスプレイの変化の後の最小化だけを見ており、15回中4回でウィンドウが最小化のまま残った。それらの回では、glazewmはディスプレイの変化の0.07〜0.23秒前に最小化を知っていた。前後どちらの順序も見るようにした版では、Windowsの既定のままのゲストで15回実行し、ウィンドウが最小化されたのは2回だった。glazewmはその2回とも`Window minimized by a display change, restoring`を記録し、最小化のまま残ったウィンドウはなかった。
 
 ## 発見時に未解決だった点
 
