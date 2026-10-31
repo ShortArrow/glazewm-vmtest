@@ -3,3 +3,4 @@
 pub mod baseline_file;
 pub mod dockur;
 pub mod glazewm;
+pub mod windows_guest;
