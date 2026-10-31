@@ -8,7 +8,9 @@ use crate::topology::Rect;
 /// One operation of a scenario's When.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Step {
-    /// Sets how many virtual monitors exist besides the platform's own display.
+    /// Sets how many virtual monitors exist besides the platform's own display: every virtual monitor leaves, the
+    /// SUT settles without them, then the new count arrives. The virtual display driver can change its count only by
+    /// letting every monitor go, and a SUT that missed that would see a different sequence from run to run.
     SetVirtualMonitorCount(u32),
     /// Sets the virtual monitor count to each of `counts` in turn, `apart` after the guest OS shows the one before,
     /// as a dock does when it drops its monitors and brings them back; the SUT is not given time to settle in between.

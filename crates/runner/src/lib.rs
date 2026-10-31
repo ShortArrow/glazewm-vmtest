@@ -90,7 +90,7 @@ where
     let mut loads = ActiveLoads::default();
     let mut outcomes = vec![settled_outcome(scenario, &loads, guest, clock, settle)?];
     for step in &scenario.steps {
-        apply(step, guest, clock)?;
+        apply(step, scenario, guest, clock, settle)?;
         loads.apply(step);
         outcomes.push(settled_outcome(scenario, &loads, guest, clock, settle)?);
     }
@@ -99,11 +99,17 @@ where
 
 fn apply(
     step: &Step,
-    guest: &mut (impl DisplayController + WorkloadController),
+    scenario: &Scenario,
+    guest: &mut (impl DisplayController + WorkloadController + Observer),
     clock: &mut dyn Clock,
+    settle: SettleSettings,
 ) -> Result<(), String> {
     match step {
-        Step::SetVirtualMonitorCount(count) => guest.set_virtual_monitor_count(*count),
+        Step::SetVirtualMonitorCount(count) => {
+            guest.remove_virtual_monitors()?;
+            settled_observation(|| guest.observe(scenario.ipc_limit), clock, settle)?;
+            guest.set_virtual_monitor_count(*count)
+        }
         Step::SetVirtualMonitorCounts { counts, apart } => {
             for (index, count) in counts.iter().enumerate() {
                 if index > 0 {
@@ -376,9 +382,27 @@ mod tests {
                 "wait_until_ready",
                 "set_virtual_monitor_count 1",
                 "start_sut",
+                "remove_virtual_monitors",
                 "set_virtual_monitor_count 3"
             ]
         );
+    }
+
+    fn run_one_step(step: Step) -> Duration {
+        let mut guest = FakeGuest::observing(vec![observed(2, 2)]);
+        let mut clock = FakeClock(Duration::ZERO);
+
+        run(&scenario(vec![step]), &mut guest, &mut clock, SETTLE).unwrap();
+
+        clock.0
+    }
+
+    #[test]
+    fn lets_the_sut_settle_with_every_virtual_monitor_gone_before_setting_a_count() {
+        let removing = run_one_step(Step::RemoveVirtualMonitors);
+        let setting = run_one_step(Step::SetVirtualMonitorCount(3));
+
+        assert_eq!(setting - removing, SETTLE.window);
     }
 
     fn run_quick_succession(apart: Duration) -> (Vec<String>, usize, Duration) {
@@ -587,7 +611,7 @@ mod tests {
 
         let verdicts = verdicts(
             run(
-                &scenario(vec![Step::SetVirtualMonitorCount(3)]),
+                &scenario(vec![Step::RestoreVirtualMonitors]),
                 &mut guest,
                 &mut FakeClock(Duration::ZERO),
                 SETTLE,
@@ -608,8 +632,8 @@ mod tests {
         let verdicts = verdicts(
             run(
                 &scenario(vec![
-                    Step::SetVirtualMonitorCount(3),
-                    Step::SetVirtualMonitorCount(1),
+                    Step::RemoveVirtualMonitors,
+                    Step::RestoreVirtualMonitors,
                 ]),
                 &mut guest,
                 &mut FakeClock(Duration::ZERO),
