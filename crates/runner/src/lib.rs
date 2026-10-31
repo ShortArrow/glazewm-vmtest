@@ -35,6 +35,10 @@ pub trait DisplayController {
     fn set_virtual_monitor_count(&mut self, count: u32) -> Result<(), String>;
     fn remove_virtual_monitors(&mut self) -> Result<(), String>;
     fn restore_virtual_monitors(&mut self) -> Result<(), String>;
+    /// Turns every display off and returns once the guest OS has been asked to.
+    fn turn_displays_off(&mut self) -> Result<(), String>;
+    /// Wakes the displays with input and returns once the guest OS has been given it.
+    fn wake_displays(&mut self) -> Result<(), String>;
 }
 
 /// Starts and stops what the guest runs besides the SUT.
@@ -121,6 +125,8 @@ fn apply(
         }
         Step::RemoveVirtualMonitors => guest.remove_virtual_monitors(),
         Step::RestoreVirtualMonitors => guest.restore_virtual_monitors(),
+        Step::TurnDisplaysOff => guest.turn_displays_off(),
+        Step::WakeDisplays => guest.wake_displays(),
         Step::OpenTestWindows(batch) => guest.open_test_windows(batch),
         Step::HangTestWindow(id) => guest.hang_test_window(*id),
         Step::ResumeTestWindow(id) => guest.resume_test_window(*id),
@@ -268,6 +274,14 @@ mod tests {
         }
         fn restore_virtual_monitors(&mut self) -> Result<(), String> {
             self.log.push("restore_virtual_monitors".into());
+            Ok(())
+        }
+        fn turn_displays_off(&mut self) -> Result<(), String> {
+            self.log.push("turn_displays_off".into());
+            Ok(())
+        }
+        fn wake_displays(&mut self) -> Result<(), String> {
+            self.log.push("wake_displays".into());
             Ok(())
         }
     }
@@ -439,6 +453,21 @@ mod tests {
         let (_, _, spaced) = run_quick_succession(Duration::from_secs(3));
 
         assert_eq!(spaced - back_to_back, Duration::from_secs(6));
+    }
+
+    #[test]
+    fn turns_the_displays_off_and_wakes_them_as_steps() {
+        let mut guest = FakeGuest::observing(vec![observed(2, 2)]);
+
+        run(
+            &scenario(vec![Step::TurnDisplaysOff, Step::WakeDisplays]),
+            &mut guest,
+            &mut FakeClock(Duration::ZERO),
+            SETTLE,
+        )
+        .unwrap();
+
+        assert_eq!(guest.log[4..], ["turn_displays_off", "wake_displays"]);
     }
 
     #[test]

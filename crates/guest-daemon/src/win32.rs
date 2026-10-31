@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use vmtest_protocol::{DisplayDto, PresenceDto, RectDto};
+use windows::Win32::Foundation::WPARAM;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
@@ -18,10 +19,55 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GWL_STYLE, GetWindowLongPtrW, IsWindow, WS_CHILD};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_MOVE, MOUSEINPUT, SendInput,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GWL_STYLE, GetWindowLongPtrW, HWND_BROADCAST, IsWindow, PostMessageW, SC_MONITORPOWER,
+    WM_SYSCOMMAND, WS_CHILD,
+};
 use windows::core::{BOOL, PWSTR};
 
 use crate::TopologySource;
+
+/// Turns the displays off by asking every top-level window to, as the system does on idle; wakes them by
+/// moving the mouse there and back, since the OS no longer turns displays on for `SC_MONITORPOWER` alone.
+pub fn set_display_power(on: bool) -> Result<(), String> {
+    if on {
+        let nudge = |dx: i32| INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dx,
+                    dwFlags: MOUSEEVENTF_MOVE,
+                    ..Default::default()
+                },
+            },
+        };
+        let inputs = [nudge(1), nudge(-1)];
+        let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+        if sent as usize == inputs.len() {
+            Ok(())
+        } else {
+            Err(format!(
+                "SendInput sent {sent} of {} inputs: {}",
+                inputs.len(),
+                windows::core::Error::from_thread()
+            ))
+        }
+    } else {
+        const MONITOR_OFF: isize = 2;
+        unsafe {
+            PostMessageW(
+                Some(HWND_BROADCAST),
+                WM_SYSCOMMAND,
+                WPARAM(SC_MONITORPOWER as usize),
+                LPARAM(MONITOR_OFF),
+            )
+        }
+        .map_err(|error| format!("cannot ask the windows to turn the displays off: {error}"))
+    }
+}
 
 /// The `MONITORINFO.dwFlags` bit marking the primary monitor.
 const MONITORINFOF_PRIMARY: u32 = 1;

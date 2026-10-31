@@ -23,7 +23,8 @@ fn main() -> std::io::Result<()> {
     use vmtest_guest_daemon::test_windows::LaunchedApp;
     use vmtest_guest_daemon::win32::{self, Win32Topology};
     use vmtest_guest_daemon::{
-        CliOutcome, GlazewmCli, LoadHost, SutProcesses, TestWindowHost, TopologySource, serve,
+        CliOutcome, DisplayPower, GlazewmCli, LoadHost, SutProcesses, TestWindowHost,
+        TopologySource, serve,
     };
     use vmtest_protocol::{DisplayDto, LoadKindDto, PresenceDto, SutProgram, TestWindowDto};
 
@@ -96,6 +97,12 @@ fn main() -> std::io::Result<()> {
 
         fn start(&self, program: SutProgram) -> Result<(), String> {
             self.sut(program).start()
+        }
+    }
+
+    impl DisplayPower for LiveGuest {
+        fn set_display_power(&self, on: bool) -> Result<(), String> {
+            win32::set_display_power(on)
         }
     }
 

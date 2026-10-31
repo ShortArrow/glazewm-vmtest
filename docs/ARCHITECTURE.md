@@ -29,7 +29,7 @@ Dependencies point upward only. The domain knows nothing about virtualization pl
 - `Topology`: a value object holding the set of displays; each display has an identifier, bounds, working area, DPI, and a primary flag.
 - `WindowKind`: one value per axis of the "Window kinds" section of docs/PRD.md.
 - `Scenario`: Given (initial `Topology`, SUT configuration), When (a sequence of `Step`), Then (a set of `Invariant` and, optionally, a `Baseline`).
-- `Step`: add monitor, remove monitor, change settings, RDP connect / disconnect, VNC connect / disconnect, sleep / resume, lock / unlock, start / stop load, spawn windows, hang / resume window, replace and reload SUT config, wait.
+- `Step`: add monitor, remove monitor, change settings, RDP connect / disconnect, VNC connect / disconnect, sleep / resume, display off / wake, lock / unlock, start / stop load, spawn windows, hang / resume window, replace and reload SUT config, wait.
 - `Invariant`: a pure function from an observation to pass/fail plus the difference.
 - `Baseline`: the canonical observations recorded from a reference run of a scenario, with the SUT commit they were taken from.
 - `Verdict`: the per-step result: invariant violations, deviations from the baseline, unsettled, or skipped, each reported separately.

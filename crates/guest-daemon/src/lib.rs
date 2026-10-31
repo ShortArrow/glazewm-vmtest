@@ -76,10 +76,22 @@ pub trait LoadHost {
     fn stop_load(&self, kind: LoadKindDto) -> Result<(), String>;
 }
 
-/// Everything the daemon reads from or does in the guest.
-pub trait Guest: TopologySource + GlazewmCli + SutProcesses + TestWindowHost + LoadHost {}
+/// Turns the displays of the interactive session off and on.
+pub trait DisplayPower {
+    /// Turns the displays off, or wakes them with input, and returns once the OS has been asked.
+    fn set_display_power(&self, on: bool) -> Result<(), String>;
+}
 
-impl<T: TopologySource + GlazewmCli + SutProcesses + TestWindowHost + LoadHost> Guest for T {}
+/// Everything the daemon reads from or does in the guest.
+pub trait Guest:
+    TopologySource + GlazewmCli + SutProcesses + TestWindowHost + LoadHost + DisplayPower
+{
+}
+
+impl<T> Guest for T where
+    T: TopologySource + GlazewmCli + SutProcesses + TestWindowHost + LoadHost + DisplayPower
+{
+}
 
 /// Answers one request.
 pub fn handle(request: Request, guest: &dyn Guest) -> Response {
@@ -142,6 +154,10 @@ pub fn handle(request: Request, guest: &dyn Guest) -> Response {
         },
         Request::ResumeTestWindow { id } => match guest.resume(id) {
             Ok(()) => Response::TestWindowResumed { id },
+            Err(message) => Response::Error { message },
+        },
+        Request::SetDisplayPower { on } => match guest.set_display_power(on) {
+            Ok(()) => Response::DisplayPowerSet { on },
             Err(message) => Response::Error { message },
         },
     }
@@ -210,6 +226,16 @@ mod tests {
         }
         fn stop_load(&self, _kind: LoadKindDto) -> Result<(), String> {
             Err("no load generator in this fake".into())
+        }
+    }
+
+    impl DisplayPower for FixedWindows {
+        fn set_display_power(&self, on: bool) -> Result<(), String> {
+            if on {
+                Err("no input to wake the displays in this fake".into())
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -325,6 +351,25 @@ mod tests {
     }
 
     #[test]
+    fn answers_that_the_displays_were_turned_off_or_why_not() {
+        let guest = FixedWindows {
+            opened: Ok(vec![]),
+            windows: vec![],
+        };
+
+        assert_eq!(
+            handle(Request::SetDisplayPower { on: false }, &guest),
+            Response::DisplayPowerSet { on: false }
+        );
+        assert_eq!(
+            handle(Request::SetDisplayPower { on: true }, &guest),
+            Response::Error {
+                message: "no input to wake the displays in this fake".into()
+            }
+        );
+    }
+
+    #[test]
     fn answers_with_every_test_window_and_its_frame() {
         let window = TestWindowDto {
             id: 0,
@@ -358,6 +403,12 @@ mod tests {
     impl GlazewmCli for FixedProcesses {
         fn run(&self, _args: &[String], _limit: Duration) -> Result<CliOutcome, String> {
             Err("no glazewm-cli in this fake".into())
+        }
+    }
+
+    impl DisplayPower for FixedProcesses {
+        fn set_display_power(&self, _on: bool) -> Result<(), String> {
+            Err("no displays in this fake".into())
         }
     }
 
@@ -474,6 +525,12 @@ mod tests {
         }
     }
 
+    impl DisplayPower for FixedTopology {
+        fn set_display_power(&self, _on: bool) -> Result<(), String> {
+            Err("no displays in this fake".into())
+        }
+    }
+
     impl LoadHost for FixedTopology {
         fn start_load(&self, kind: LoadKindDto, percent: u8) -> Result<(), String> {
             assert_eq!((kind, percent), (LoadKindDto::Cpu, 100));
@@ -537,6 +594,12 @@ mod tests {
         }
         fn start(&self, _program: SutProgram) -> Result<(), String> {
             Err("no processes in this fake".into())
+        }
+    }
+
+    impl DisplayPower for FakeCli {
+        fn set_display_power(&self, _on: bool) -> Result<(), String> {
+            Err("no displays in this fake".into())
         }
     }
 

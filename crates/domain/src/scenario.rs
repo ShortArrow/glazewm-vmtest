@@ -22,6 +22,10 @@ pub enum Step {
     RemoveVirtualMonitors,
     /// Brings back the virtual monitors removed by `RemoveVirtualMonitors`.
     RestoreVirtualMonitors,
+    /// Turns every display off, as the OS does when the user is away; the monitors stay connected.
+    TurnDisplaysOff,
+    /// Wakes the displays with input, as the user does on returning.
+    WakeDisplays,
     OpenTestWindows(TestWindowBatch),
     /// Stops the message processing of the test window with this id.
     HangTestWindow(u32),

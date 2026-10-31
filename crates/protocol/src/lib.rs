@@ -59,6 +59,10 @@ pub enum Request {
     StopLoad {
         kind: LoadKindDto,
     },
+    /// Turns the displays off, as the OS does when the user is away, or wakes them with input, as the user does.
+    SetDisplayPower {
+        on: bool,
+    },
 }
 
 /// The SUT programs the harness deploys into the guest.
@@ -129,6 +133,9 @@ pub enum Response {
     },
     TestWindowResumed {
         id: u32,
+    },
+    DisplayPowerSet {
+        on: bool,
     },
     Error {
         message: String,
@@ -426,6 +433,19 @@ mod tests {
             Response::LoadStopped {
                 kind: LoadKindDto::Cpu
             }
+        );
+    }
+
+    #[test]
+    fn asks_to_turn_the_displays_off_and_answers_that_they_are() {
+        assert_eq!(
+            encode_line(&Request::SetDisplayPower { on: false }),
+            "{\"type\":\"set_display_power\",\"on\":false}
+"
+        );
+        assert_eq!(
+            decode_line::<Response>(r#"{"type":"display_power_set","on":false}"#).unwrap(),
+            Response::DisplayPowerSet { on: false }
         );
     }
 

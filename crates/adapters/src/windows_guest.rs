@@ -293,6 +293,15 @@ impl<H> WindowsGuest<H> {
         self.scp(&[&zebar.resources], "C:/vmtest/zebar/_up_/_up_/")
     }
 
+    fn set_display_power(&mut self, on: bool) -> Result<(), String> {
+        match self.request(&Request::SetDisplayPower { on })? {
+            Response::DisplayPowerSet { on: set } if set == on => Ok(()),
+            other => Err(format!(
+                "unexpected answer to setting the display power {on}: {other:?}"
+            )),
+        }
+    }
+
     fn glazewm_is_running(&mut self) -> Result<bool, String> {
         let request = Request::SutRunning {
             program: SutProgram::Glazewm,
@@ -413,6 +422,14 @@ impl<H> DisplayController for WindowsGuest<H> {
             "Get-PnpDevice -FriendlyName '{VIRTUAL_DISPLAY_DRIVER}' | Enable-PnpDevice -Confirm:$false"
         ))
         .map(|_| ())
+    }
+
+    fn turn_displays_off(&mut self) -> Result<(), String> {
+        self.set_display_power(false)
+    }
+
+    fn wake_displays(&mut self) -> Result<(), String> {
+        self.set_display_power(true)
     }
 }
 
