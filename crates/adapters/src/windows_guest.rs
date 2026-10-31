@@ -1,5 +1,6 @@
 //! A Windows guest reached over SSH and the guest daemon, whatever the platform it runs on.
 
+use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -104,7 +105,7 @@ impl<H> WindowsGuest<H> {
         let mut command = Command::new("ssh");
         command
             .args(self.ssh_options())
-            .args(["-N", "-o", "ExitOnForwardFailure=yes", "-L"])
+            .args(["-v", "-N", "-o", "ExitOnForwardFailure=yes", "-L"])
             .arg(format!("{}:{guest_address}", self.config.daemon_address))
             .arg("-p")
             .arg(self.config.ssh_port.to_string())
@@ -116,13 +117,15 @@ impl<H> WindowsGuest<H> {
     fn open_daemon_forward(&mut self) -> Result<(), String> {
         self.close_daemon_forward();
         if let Some(mut command) = self.daemon_forward_command() {
-            let forward = command
+            let mut forward = command
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stderr(Stdio::piped())
                 .spawn()
                 .map_err(|error| format!("cannot start the SSH port forward: {error}"))?;
+            let stderr = forward.stderr.take().map(BufReader::new);
             self.daemon_forward = Some(forward);
+            wait_until_forwarding(stderr.expect("stderr is piped"))?;
         }
         Ok(())
     }
@@ -312,9 +315,6 @@ impl<H> GuestExecutor for WindowsGuest<H> {
                 }
             },
         )?;
-        if let Some(forward) = self.daemon_forward.as_mut() {
-            forward_holds_its_address(forward)?;
-        }
         self.daemon = Some(daemon);
         Ok(())
     }
@@ -508,15 +508,23 @@ pub(crate) fn run(command: &mut Command) -> Result<(), String> {
     }
 }
 
-/// Whether `forward`, an ssh started with `ExitOnForwardFailure`, is still running and so bound the forwarded address.
-fn forward_holds_its_address(forward: &mut Child) -> Result<(), String> {
-    match forward.try_wait() {
-        Ok(None) => Ok(()),
-        Ok(Some(status)) => Err(format!(
-            "the SSH port forward to the guest daemon exited ({status}), so another process may hold its address"
-        )),
-        Err(error) => Err(format!("cannot check the SSH port forward: {error}")),
+/// Reads the `-v` output of an ssh started with `ExitOnForwardFailure` until it reports listening on the forwarded
+/// address, so that no other process holds that address when the runner connects to it, then keeps draining it.
+fn wait_until_forwarding(stderr: impl BufRead + Send + 'static) -> Result<(), String> {
+    let mut lines = stderr.lines();
+    let mut last = String::new();
+    for line in lines.by_ref() {
+        let line = line.map_err(|error| format!("cannot read the SSH port forward: {error}"))?;
+        if line.contains("Local forwarding listening on") {
+            std::thread::spawn(move || lines.for_each(drop));
+            return Ok(());
+        }
+        last = line;
     }
+    Err(format!(
+        "the SSH port forward to the guest daemon exited without listening: {}",
+        last.trim()
+    ))
 }
 
 /// Retries `attempt` every second until it succeeds or `deadline` passes, returning the last error.
@@ -584,15 +592,27 @@ mod tests {
     }
 
     #[test]
-    fn a_forward_whose_ssh_has_exited_does_not_hold_the_daemon_address() {
-        let mut exited = Command::new("ssh")
-            .arg("-V")
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
-        exited.wait().unwrap();
+    fn the_forward_is_ready_once_ssh_reports_listening_on_the_daemon_address() {
+        let stderr = b"debug1: Connection established.\r\n\
+            debug1: Local connections to 127.0.0.1:17041 forwarded to remote address 127.0.0.1:7041\r\n\
+            debug1: Local forwarding listening on 127.0.0.1 port 17041.\r\n\
+            debug1: channel 0: new port-listener\r\n";
 
-        assert!(forward_holds_its_address(&mut exited).is_err());
+        assert_eq!(wait_until_forwarding(&stderr[..]), Ok(()));
+    }
+
+    #[test]
+    fn a_forward_whose_ssh_exits_without_listening_is_refused_with_its_last_words() {
+        let stderr = b"debug1: Local connections to 127.0.0.1:17041 forwarded to remote address 127.0.0.1:7041\r\n\
+            bind [127.0.0.1]:17041: Address already in use\r\n\
+            Could not request local forwarding.\r\n";
+
+        let error = wait_until_forwarding(&stderr[..]).unwrap_err();
+
+        assert!(
+            error.contains("Could not request local forwarding."),
+            "{error}"
+        );
     }
 
     #[test]
@@ -610,6 +630,7 @@ mod tests {
         assert_eq!(command.get_program(), "ssh");
         assert!(
             arguments.ends_with(&[
+                "-v".into(),
                 "-N".into(),
                 "-o".into(),
                 "ExitOnForwardFailure=yes".into(),
