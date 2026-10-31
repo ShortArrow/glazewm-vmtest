@@ -25,7 +25,7 @@ For each mechanism: can it present a monitor add/remove to the guest as a hot-pl
 
 | Mechanism | Platform | What to find out |
 |---|---|---|
-| In-guest virtual display driver (IddCx) | All | Can monitors be added and removed with in-guest commands alone? Does the driver need test-signing mode? On Hyper-V, whose synthetic video has a single output, this is the only per-monitor mechanism |
+| In-guest virtual display driver (IddCx) | All | Is there a driver, usable under its license, that adds or removes one monitor while the others stay? The driver in the guest image changes its monitor count only by restarting, so every virtual monitor leaves and the new count arrives. On Hyper-V, whose synthetic video has a single output, this is the only per-monitor mechanism |
 | Multi-head virtual GPU (virtio-gpu, QXL) | QEMU/KVM | Does the Windows guest driver reflect enabling and disabling individual outputs? |
 | Resolution change inside the guest | All | Does a change made by the guest daemon raise the same messages as a user's change? `Set-VMVideo` only sets which resolutions a Hyper-V guest supports, so it does not serve here |
 | RDP client monitor layout (`/multimon`, `/selectedmonitors`, resolution) | All | Can a reconnect present a different topology? Is a headless-capable RDP client (FreeRDP or similar) sufficient? |

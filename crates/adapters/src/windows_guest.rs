@@ -395,11 +395,7 @@ impl<H> GuestExecutor for WindowsGuest<H> {
 impl<H> DisplayController for WindowsGuest<H> {
     fn set_virtual_monitor_count(&mut self, count: u32) -> Result<(), String> {
         settable_virtual_monitor_count(count)?;
-        self.ssh(&format!(
-            "$p = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'MTTVirtualDisplayPipe', 'InOut'); \
-             $p.Connect(5000); $b = [Text.Encoding]::Unicode.GetBytes('SETDISPLAYCOUNT {count}'); \
-             $p.Write($b, 0, $b.Length); $p.Flush(); Start-Sleep -Milliseconds 500; $p.Dispose()"
-        ))?;
+        self.ssh(&virtual_monitor_count_command(count))?;
         poll(VIRTUAL_MONITORS_LIMIT, "the virtual monitors", || {
             virtual_monitors_in_place(&self.displays()?, count)
         })
@@ -584,6 +580,18 @@ fn wait_until_forwarding(
 }
 
 /// Succeeds when the OS shows `count` displays driven by the virtual display driver among `displays`.
+/// Sets the count in the driver's settings while its device is disabled, since the driver reads the count only when
+/// it starts, and its own request for a new count restarts it by crashing, which Windows allows only a few times.
+fn virtual_monitor_count_command(count: u32) -> String {
+    format!(
+        "$d = Get-PnpDevice -FriendlyName '{VIRTUAL_DISPLAY_DRIVER}'; \
+         $d | Disable-PnpDevice -Confirm:$false; \
+         $s = 'C:\\VirtualDisplayDriver\\vdd_settings.xml'; \
+         (Get-Content -Raw $s) -replace '<count>\\d+</count>', '<count>{count}</count>' | Set-Content -NoNewline $s; \
+         $d | Enable-PnpDevice -Confirm:$false"
+    )
+}
+
 /// The virtual display driver stops working when asked for no monitors, until the guest is restored.
 fn settable_virtual_monitor_count(count: u32) -> Result<(), String> {
     if count == 0 {
@@ -688,6 +696,18 @@ mod tests {
         assert_eq!(
             settable_virtual_monitor_count(0),
             Err("the virtual display driver fails when asked for no monitors; remove the virtual monitors instead".into())
+        );
+    }
+
+    #[test]
+    fn writes_the_count_while_the_driver_is_stopped_so_that_it_starts_with_that_many_monitors() {
+        assert_eq!(
+            virtual_monitor_count_command(2),
+            "$d = Get-PnpDevice -FriendlyName 'Virtual Display Driver'; \
+             $d | Disable-PnpDevice -Confirm:$false; \
+             $s = 'C:\\VirtualDisplayDriver\\vdd_settings.xml'; \
+             (Get-Content -Raw $s) -replace '<count>\\d+</count>', '<count>2</count>' | Set-Content -NoNewline $s; \
+             $d | Enable-PnpDevice -Confirm:$false"
         );
     }
 
