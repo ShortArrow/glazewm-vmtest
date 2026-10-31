@@ -2,7 +2,7 @@
 
 use std::net::TcpStream;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use vmtest_domain::scenario::{
@@ -27,7 +27,11 @@ pub struct GuestConfig {
     pub ssh_port: u16,
     pub ssh_key: PathBuf,
     pub user: String,
+    /// The address the runner connects to the guest daemon on.
     pub daemon_address: String,
+    /// The address the guest daemon listens on inside the guest, when the runner reaches it through an SSH port
+    /// forward from `daemon_address`; `None` when `daemon_address` reaches the daemon directly.
+    pub daemon_forward: Option<String>,
     pub daemon_executable: PathBuf,
     /// The Win32 test-window application, delivered beside the daemon.
     pub test_window_executable: PathBuf,
@@ -46,7 +50,9 @@ pub struct WindowsGuest<H> {
     config: GuestConfig,
     hypervisor: H,
     daemon: Option<GuestDaemonClient<TcpStream>>,
+    daemon_forward: Option<Child>,
 }
+
 const VIRTUAL_DISPLAY: &str = "Get-PnpDevice -FriendlyName 'Virtual Display Driver'";
 
 /// How long one connect, read, or write to the guest daemon may take.
@@ -61,6 +67,7 @@ impl<H> WindowsGuest<H> {
             config,
             hypervisor,
             daemon: None,
+            daemon_forward: None,
         }
     }
 
@@ -89,6 +96,43 @@ impl<H> WindowsGuest<H> {
             .arg(self.config.ssh_port.to_string())
             .args(sources.iter().map(|source| source.as_os_str()))
             .arg(format!("{}:{destination}", self.ssh_destination())))
+    }
+
+    /// The ssh command that forwards `daemon_address` to the guest daemon, if the daemon is reached that way.
+    fn daemon_forward_command(&self) -> Option<Command> {
+        let guest_address = self.config.daemon_forward.as_ref()?;
+        let mut command = Command::new("ssh");
+        command
+            .args(self.ssh_options())
+            .args(["-N", "-o", "ExitOnForwardFailure=yes", "-L"])
+            .arg(format!("{}:{guest_address}", self.config.daemon_address))
+            .arg("-p")
+            .arg(self.config.ssh_port.to_string())
+            .arg(self.ssh_destination());
+        Some(command)
+    }
+
+    /// Replaces the SSH port forward to the guest daemon, if the daemon is reached that way.
+    fn open_daemon_forward(&mut self) -> Result<(), String> {
+        self.close_daemon_forward();
+        if let Some(mut command) = self.daemon_forward_command() {
+            let forward = command
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|error| format!("cannot start the SSH port forward: {error}"))?;
+            self.daemon_forward = Some(forward);
+        }
+        Ok(())
+    }
+
+    fn close_daemon_forward(&mut self) {
+        self.daemon = None;
+        if let Some(mut forward) = self.daemon_forward.take() {
+            let _ = forward.kill();
+            let _ = forward.wait();
+        }
     }
 
     fn ssh_destination(&self) -> String {
@@ -223,9 +267,15 @@ impl<H> WindowsGuest<H> {
     }
 }
 
+impl<H> Drop for WindowsGuest<H> {
+    fn drop(&mut self) {
+        self.close_daemon_forward();
+    }
+}
+
 impl<H: Hypervisor> Hypervisor for WindowsGuest<H> {
     fn restore(&mut self) -> Result<(), String> {
-        self.daemon = None;
+        self.close_daemon_forward();
         self.hypervisor.restore()
     }
 }
@@ -247,6 +297,7 @@ impl<H> GuestExecutor for WindowsGuest<H> {
             self.scp(&[&limits], "C:/vmtest/guest-daemon.json")?;
         }
         self.ssh("Start-ScheduledTask -TaskName vmtest-guest-daemon")?;
+        self.open_daemon_forward()?;
         let address = self.config.daemon_address.clone();
         let daemon = poll(
             Duration::from_secs(60),
@@ -471,5 +522,72 @@ fn poll<T>(
             }
             Err(_) => std::thread::sleep(Duration::from_secs(1)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn guest(daemon_forward: Option<&str>) -> WindowsGuest<()> {
+        WindowsGuest::with_hypervisor(
+            GuestConfig {
+                ssh_host: "192.0.2.7".into(),
+                ssh_port: 22,
+                ssh_key: PathBuf::from("keys/id_ed25519"),
+                user: "fixture".into(),
+                daemon_address: "127.0.0.1:17041".into(),
+                daemon_forward: daemon_forward.map(String::from),
+                daemon_executable: PathBuf::new(),
+                test_window_executable: PathBuf::new(),
+                load_executable: PathBuf::new(),
+                daemon_limits: None,
+                glazewm_build: PathBuf::new(),
+                glazewm_config: PathBuf::new(),
+                start_glazewm_script: PathBuf::new(),
+            },
+            (),
+        )
+    }
+
+    fn arguments(command: &Command) -> Vec<String> {
+        command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn a_daemon_reached_directly_needs_no_forward() {
+        assert!(guest(None).daemon_forward_command().is_none());
+    }
+
+    #[test]
+    fn forwards_the_daemon_address_to_the_daemon_inside_the_guest_without_a_shell() {
+        let command = guest(Some("127.0.0.1:7041"))
+            .daemon_forward_command()
+            .unwrap();
+        let arguments = arguments(&command);
+
+        assert_eq!(command.get_program(), "ssh");
+        assert!(
+            arguments.ends_with(&[
+                "-N".into(),
+                "-o".into(),
+                "ExitOnForwardFailure=yes".into(),
+                "-L".into(),
+                "127.0.0.1:17041:127.0.0.1:7041".into(),
+                "-p".into(),
+                "22".into(),
+                "fixture@192.0.2.7".into(),
+            ]),
+            "{arguments:?}"
+        );
+        assert!(
+            arguments
+                .windows(2)
+                .any(|pair| pair == ["-i", "keys/id_ed25519"]),
+            "{arguments:?}"
+        );
     }
 }

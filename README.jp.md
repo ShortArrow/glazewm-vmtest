@@ -33,4 +33,4 @@
 
 ## 現状
 
-docs/ROADMAP.jp.mdの段階0を進めている。dockur/windowsのゲストに対して、シナリオが1本、端から端まで動く。ゲストデーモンとglazewmをそのテストの冒頭のとおりにビルドしてから、`cargo test -p vmtest-adapters --test live_dockur -- --ignored`で実行する。検証の結果はdocs/spikes/に、途中で見つけたglazewmの振る舞いはdocs/findings/にある。
+docs/ROADMAP.jp.mdの段階0を進めている。Hyper-Vのゲストかdockur/windowsのゲストに対して、シナリオが端から端まで動く。ゲストデーモンとglazewmをビルドし、そのテストの冒頭にある環境変数を設定してから、`cargo test -p vmtest-adapters --test live -- --ignored`で実行する。検証の結果はdocs/spikes/に、途中で見つけたglazewmの振る舞いはdocs/findings/にある。

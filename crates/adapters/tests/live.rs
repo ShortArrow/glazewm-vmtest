@@ -1,7 +1,11 @@
-//! Runs a scenario against the dockur/windows guest in guests/dockur-windows.
+//! Runs scenarios against a guest of docs/GUEST-IMAGE.md.
 //!
 //! Needs `cargo build --release -p vmtest-guest-daemon -p vmtest-test-window-win32 -p vmtest-load`, glazewm built into target/sut/glazewm/release
-//! (or the directory named by `VMTEST_GLAZEWM_BUILD`), and the guest image of docs/GUEST-IMAGE.md.
+//! (or the directory named by `VMTEST_GLAZEWM_BUILD`), and the guest.
+//!
+//! `VMTEST_PLATFORM` picks the guest: `hyperv` (the default) or `dockur`. On Hyper-V, `VMTEST_GUEST_ADDRESS`
+//! is the guest's address, and `VMTEST_HYPERV_HOST`, when set, is the `ssh` destination of the Hyper-V host;
+//! when unset, the Hyper-V host is the machine the tests run on.
 //!
 //! A scenario with a baseline compares its observations with baselines/<name>.json. With
 //! `VMTEST_RECORD=1` it records that file instead, from the glazewm commit named by `VMTEST_SUT_COMMIT`.
@@ -10,14 +14,32 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use vmtest_adapters::baseline_file;
-use vmtest_adapters::dockur::{DockurConfig, DockurGuest, SystemClock};
+use vmtest_adapters::dockur::DockurContainer;
 use vmtest_adapters::glazewm::config_without_startup_commands;
+use vmtest_adapters::hyperv::{HyperVCheckpoint, HyperVHost};
+use vmtest_adapters::powershell::encoded_command;
+use vmtest_adapters::windows_guest::{GuestConfig, SystemClock, WindowsGuest};
 use vmtest_domain::baseline::{Baseline, Deviation};
 use vmtest_domain::scenario::{
     DEFAULT_IPC_LIMIT, Load, LoadKind, Observation, Scenario, Step, StepVerdict, TestWindowBatch,
     WindowLifetime,
 };
-use vmtest_runner::{SettleSettings, run};
+use vmtest_runner::{Hypervisor, SettleSettings, run};
+
+/// The guest's platform, chosen by `VMTEST_PLATFORM`.
+enum Platform {
+    HyperV(HyperVCheckpoint),
+    Dockur(DockurContainer),
+}
+
+impl Hypervisor for Platform {
+    fn restore(&mut self) -> Result<(), String> {
+        match self {
+            Platform::HyperV(checkpoint) => checkpoint.restore(),
+            Platform::Dockur(container) => container.restore(),
+        }
+    }
+}
 
 fn repository() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -32,24 +54,48 @@ fn quiet_glazewm_config() -> String {
     config_without_startup_commands(&sample)
 }
 
-/// A guest whose glazewm starts with `glazewm_config`, written under `name` in target/vmtest.
-fn config(name: &str, glazewm_config: &str) -> DockurConfig {
+/// The quiet sample configuration with ten workspaces that are all kept alive, seven of them bound to the
+/// second monitor, so that no workspace configuration is left for a monitor added later.
+fn every_workspace_kept_alive_config() -> String {
+    let quiet = quiet_glazewm_config();
+    let start = quiet
+        .find("\nworkspaces:")
+        .expect("the sample has a workspaces section")
+        + 1;
+    let end = quiet
+        .find("\nwindow_rules:")
+        .expect("window rules follow the workspaces")
+        + 1;
+    let bound =
+        |name: &str| format!("  - name: '{name}'\n    bind_to_monitor: 1\n    keep_alive: true\n");
+    let kept = |name: &str| format!("  - name: '{name}'\n    keep_alive: true\n");
+    let workspaces: String = ["0", "1", "2", "3", "4", "5"]
+        .into_iter()
+        .map(bound)
+        .chain(["6", "7", "8"].into_iter().map(kept))
+        .chain([bound("9")])
+        .collect();
+    format!(
+        "{}workspaces:\n{workspaces}\n{}",
+        &quiet[..start],
+        &quiet[end..]
+    )
+}
+
+/// The guest, with glazewm starting with `glazewm_config`, written under `name` in target/vmtest.
+fn guest(name: &str, glazewm_config: &str) -> WindowsGuest<Platform> {
     let repository = repository();
-    let guest = repository.join("guests/dockur-windows");
     let glazewm_config_path = repository.join("target/vmtest").join(name);
     std::fs::create_dir_all(glazewm_config_path.parent().unwrap()).unwrap();
     std::fs::write(&glazewm_config_path, glazewm_config).unwrap();
-    let glazewm_config = glazewm_config_path;
-    DockurConfig {
-        compose_dir: guest.clone(),
-        service: "windows".into(),
-        volume: "glazewm-vmtest-win11-storage".into(),
-        image: "dockurr/windows:6.06".into(),
-        snapshot: "daemon-task".into(),
-        ssh_key: guest.join(".secrets/id_ed25519"),
-        ssh_port: 2222,
+    let dockur = repository.join("guests/dockur-windows");
+    let files = GuestConfig {
+        ssh_host: String::new(),
+        ssh_port: 22,
+        ssh_key: dockur.join(".secrets/id_ed25519"),
         user: "fixture".into(),
         daemon_address: "127.0.0.1:7041".into(),
+        daemon_forward: None,
         daemon_executable: repository.join("target/release/vmtest-guest-daemon.exe"),
         test_window_executable: repository.join("target/release/vmtest-test-window-win32.exe"),
         load_executable: repository.join("target/release/vmtest-load.exe"),
@@ -57,8 +103,40 @@ fn config(name: &str, glazewm_config: &str) -> DockurConfig {
         glazewm_build: std::env::var_os("VMTEST_GLAZEWM_BUILD")
             .map(PathBuf::from)
             .unwrap_or_else(|| repository.join("target/sut/glazewm/release")),
-        glazewm_config,
-        start_glazewm_script: guest.join("scripts/start-glazewm.ps1"),
+        glazewm_config: glazewm_config_path,
+        start_glazewm_script: dockur.join("scripts/start-glazewm.ps1"),
+    };
+    match std::env::var("VMTEST_PLATFORM").as_deref() {
+        Ok("hyperv") | Err(_) => WindowsGuest::with_hypervisor(
+            GuestConfig {
+                ssh_host: std::env::var("VMTEST_GUEST_ADDRESS")
+                    .expect("VMTEST_GUEST_ADDRESS names the Hyper-V guest's address"),
+                daemon_address: "127.0.0.1:17041".into(),
+                daemon_forward: Some("127.0.0.1:7041".into()),
+                ..files
+            },
+            Platform::HyperV(HyperVCheckpoint {
+                host: std::env::var("VMTEST_HYPERV_HOST")
+                    .map_or(HyperVHost::Local, HyperVHost::Ssh),
+                vm_name: "vmtest-win11".into(),
+                checkpoint: "daemon-task".into(),
+            }),
+        ),
+        Ok("dockur") => WindowsGuest::with_hypervisor(
+            GuestConfig {
+                ssh_host: "127.0.0.1".into(),
+                ssh_port: 2222,
+                ..files
+            },
+            Platform::Dockur(DockurContainer {
+                compose_dir: dockur,
+                service: "windows".into(),
+                volume: "glazewm-vmtest-win11-storage".into(),
+                image: "dockurr/windows:6.06".into(),
+                snapshot: "daemon-task".into(),
+            }),
+        ),
+        Ok(other) => panic!("VMTEST_PLATFORM is hyperv or dockur, not {other}"),
     }
 }
 
@@ -69,7 +147,7 @@ const SETTLE: SettleSettings = SettleSettings {
 };
 
 #[test]
-#[ignore = "needs the dockur/windows guest and prebuilt binaries"]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
 fn glazewm_tracks_virtual_monitor_count_changes() {
     let scenario = Scenario {
         name: "virtual monitor count changes".into(),
@@ -82,15 +160,9 @@ fn glazewm_tracks_virtual_monitor_count_changes() {
         ],
         ipc_limit: DEFAULT_IPC_LIMIT,
     };
-    let guest = config("glazewm-config.yaml", &quiet_glazewm_config());
+    let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
-    let outcomes = run(
-        &scenario,
-        &mut DockurGuest::new(guest),
-        &mut SystemClock::start(),
-        SETTLE,
-    )
-    .unwrap();
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
 
     let observations: Vec<_> = outcomes.iter().map(|o| o.observation.clone()).collect();
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
@@ -103,7 +175,7 @@ fn glazewm_tracks_virtual_monitor_count_changes() {
 
 /// Compares `observations` with baselines/`name`.json, or records that file when `VMTEST_RECORD=1`.
 #[test]
-#[ignore = "needs the dockur/windows guest and prebuilt binaries"]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
 fn tiled_test_windows_stay_within_their_working_area_across_monitor_count_changes() {
     let scenario = Scenario {
         name: "test windows across monitor count changes".into(),
@@ -117,15 +189,9 @@ fn tiled_test_windows_stay_within_their_working_area_across_monitor_count_change
         ],
         ipc_limit: DEFAULT_IPC_LIMIT,
     };
-    let guest = config("glazewm-config.yaml", &quiet_glazewm_config());
+    let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
-    let outcomes = run(
-        &scenario,
-        &mut DockurGuest::new(guest),
-        &mut SystemClock::start(),
-        SETTLE,
-    )
-    .unwrap();
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
 
     let observations: Vec<_> = outcomes.iter().map(|o| o.observation.clone()).collect();
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
@@ -137,7 +203,34 @@ fn tiled_test_windows_stay_within_their_working_area_across_monitor_count_change
 }
 
 #[test]
-#[ignore = "needs the dockur/windows guest and prebuilt binaries"]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
+fn every_monitor_gets_a_workspace_back_when_every_workspace_is_kept_alive() {
+    let scenario = Scenario {
+        name: "every workspace kept alive across losing displays".into(),
+        virtual_monitors: 3,
+        steps: vec![Step::RemoveVirtualMonitors, Step::RestoreVirtualMonitors],
+        ipc_limit: DEFAULT_IPC_LIMIT,
+    };
+    let mut guest = guest(
+        "glazewm-every-workspace-kept-alive.yaml",
+        &every_workspace_kept_alive_config(),
+    );
+
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+
+    for outcome in &outcomes {
+        eprintln!(
+            "{:?}
+{:#?}",
+            outcome.verdict, outcome.observation
+        );
+    }
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    assert_eq!(verdicts, vec![StepVerdict::Passed; 3]);
+}
+
+#[test]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
 fn a_hung_test_window_does_not_stop_glazewm_managing_the_others() {
     let scenario = Scenario {
         name: "hung test window across losing every display".into(),
@@ -151,15 +244,9 @@ fn a_hung_test_window_does_not_stop_glazewm_managing_the_others() {
         ],
         ipc_limit: DEFAULT_IPC_LIMIT,
     };
-    let guest = config("glazewm-config.yaml", &quiet_glazewm_config());
+    let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
-    let outcomes = run(
-        &scenario,
-        &mut DockurGuest::new(guest),
-        &mut SystemClock::start(),
-        SETTLE,
-    )
-    .unwrap();
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
 
     let observations: Vec<_> = outcomes.iter().map(|o| o.observation.clone()).collect();
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
@@ -176,7 +263,7 @@ fn a_hung_test_window_does_not_stop_glazewm_managing_the_others() {
 /// Windows opened in a burst land in an order that depends on timing, so this scenario has no baseline
 /// and is judged by its invariants alone.
 #[test]
-#[ignore = "needs the dockur/windows guest and prebuilt binaries"]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
 fn glazewm_keeps_no_short_lived_window_after_a_burst() {
     let burst = |count, within_ms, lifetime| {
         Step::OpenTestWindows(TestWindowBatch {
@@ -202,15 +289,9 @@ fn glazewm_keeps_no_short_lived_window_after_a_burst() {
         ],
         ipc_limit: DEFAULT_IPC_LIMIT,
     };
-    let guest = config("glazewm-config.yaml", &quiet_glazewm_config());
+    let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
-    let outcomes = run(
-        &scenario,
-        &mut DockurGuest::new(guest),
-        &mut SystemClock::start(),
-        SETTLE,
-    )
-    .unwrap();
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
 
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed; 7]);
@@ -219,7 +300,7 @@ fn glazewm_keeps_no_short_lived_window_after_a_burst() {
 /// Under load glazewm may miss an IPC answer that the scenario does not hold it to, so this scenario has
 /// no baseline and is judged by its invariants alone.
 #[test]
-#[ignore = "needs the dockur/windows guest and prebuilt binaries"]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
 fn glazewm_tracks_losing_every_display_under_cpu_and_memory_load() {
     let cpu = Load {
         kind: LoadKind::Cpu,
@@ -245,15 +326,9 @@ fn glazewm_tracks_losing_every_display_under_cpu_and_memory_load() {
         ],
         ipc_limit: DEFAULT_IPC_LIMIT,
     };
-    let guest = config("glazewm-config.yaml", &quiet_glazewm_config());
+    let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
-    let outcomes = run(
-        &scenario,
-        &mut DockurGuest::new(guest),
-        &mut SystemClock::start(),
-        SETTLE,
-    )
-    .unwrap();
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
 
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed; 10]);
@@ -282,7 +357,7 @@ fn compare_or_record(name: &str, observations: &[Option<Observation>]) -> Vec<De
 
 /// A startup command naming a program that is not installed, such as a status bar the user never installed.
 #[test]
-#[ignore = "needs the dockur/windows guest and prebuilt binaries"]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
 fn glazewm_answers_ipc_after_a_startup_command_fails() {
     let scenario = Scenario {
         name: "startup command names a missing program".into(),
@@ -295,25 +370,19 @@ fn glazewm_answers_ipc_after_a_startup_command_fails() {
         "startup_commands: ['shell-exec vmtest-missing-program']",
         1,
     );
-    let guest = config(
+    let mut guest = guest(
         "glazewm-config-missing-startup-program.yaml",
         &glazewm_config,
     );
 
-    let outcomes = run(
-        &scenario,
-        &mut DockurGuest::new(guest),
-        &mut SystemClock::start(),
-        SETTLE,
-    )
-    .unwrap();
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
 
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed]);
 }
 
 #[test]
-#[ignore = "needs the dockur/windows guest and prebuilt binaries"]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
 fn reports_a_glazewm_that_exits_as_not_running() {
     let scenario = Scenario {
         name: "glazewm exits when a third monitor appears".into(),
@@ -321,7 +390,7 @@ fn reports_a_glazewm_that_exits_as_not_running() {
         steps: vec![Step::SetVirtualMonitorCount(2)],
         ipc_limit: DEFAULT_IPC_LIMIT,
     };
-    let kill_glazewm_at_three_monitors = encoded_powershell(
+    let kill_glazewm_at_three_monitors = encoded_command(
         "Add-Type -Name M -Namespace W -MemberDefinition '[DllImport(\"user32.dll\")] public static extern int GetSystemMetrics(int i);';          while ([W.M]::GetSystemMetrics(80) -lt 3) { Start-Sleep -Milliseconds 200 };          Stop-Process -Name glazewm -Force",
     );
     let glazewm_config = quiet_glazewm_config().replacen(
@@ -331,18 +400,12 @@ fn reports_a_glazewm_that_exits_as_not_running() {
         ),
         1,
     );
-    let guest = config(
+    let mut guest = guest(
         "glazewm-config-exits-at-three-monitors.yaml",
         &glazewm_config,
     );
 
-    let outcomes = run(
-        &scenario,
-        &mut DockurGuest::new(guest),
-        &mut SystemClock::start(),
-        SETTLE,
-    )
-    .unwrap();
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
 
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts[0], StepVerdict::Passed);
@@ -350,32 +413,4 @@ fn reports_a_glazewm_that_exits_as_not_running() {
         matches!(&verdicts[1], StepVerdict::Violated(v) if v.len() == 1 && v[0].invariant == "glazewm_is_running"),
         "{verdicts:?}"
     );
-}
-
-/// Encodes `script` for `powershell -EncodedCommand`: Base64 of its UTF-16LE bytes.
-///
-/// glazewm's `shell-exec` splits its command on whitespace and drops quotes, which an encoded script has none of.
-fn encoded_powershell(script: &str) -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    let mut encoded = String::new();
-    for chunk in bytes.chunks(3) {
-        let group = chunk.iter().enumerate().fold(0u32, |group, (i, &byte)| {
-            group | u32::from(byte) << (16 - 8 * i)
-        });
-        for i in 0..4 {
-            if i <= chunk.len() {
-                encoded.push(ALPHABET[(group >> (18 - 6 * i) & 63) as usize] as char);
-            } else {
-                encoded.push('=');
-            }
-        }
-    }
-    encoded
-}
-
-#[test]
-fn encodes_a_powershell_script_as_base64_of_utf16le() {
-    assert_eq!(encoded_powershell("dir"), "ZABpAHIA");
-    assert_eq!(encoded_powershell("ab"), "YQBiAA==");
 }

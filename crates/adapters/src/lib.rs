@@ -3,4 +3,6 @@
 pub mod baseline_file;
 pub mod dockur;
 pub mod glazewm;
+pub mod hyperv;
+pub mod powershell;
 pub mod windows_guest;

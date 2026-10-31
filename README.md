@@ -33,4 +33,4 @@ Every `*.md` has a Japanese translation beside it as `*.jp.md` ([README.jp.md](R
 
 ## Status
 
-Phase 0 of docs/ROADMAP.md is in progress. One scenario runs end to end against the dockur/windows guest: `cargo test -p vmtest-adapters --test live_dockur -- --ignored`, after building the guest daemon and glazewm as that test's header describes. Spike results are in docs/spikes/, glazewm behaviour found along the way in docs/findings/.
+Phase 0 of docs/ROADMAP.md is in progress. Scenarios run end to end against the Hyper-V guest or the dockur/windows guest: `cargo test -p vmtest-adapters --test live -- --ignored`, after building the guest daemon and glazewm and setting the variables that test's header describes. Spike results are in docs/spikes/, glazewm behaviour found along the way in docs/findings/.
