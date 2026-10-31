@@ -80,25 +80,47 @@ pub fn make_dpi_aware() -> Result<(), String> {
 }
 
 /// Reads displays with `EnumDisplayMonitors` from the session the process runs in.
+///
+/// The enumeration fails now and then while the OS is changing its displays, so a failure is retried a few times
+/// before it is reported.
 pub struct Win32Topology;
+
+/// How many times, and how far apart, a failed display enumeration is tried again.
+const ENUMERATION_RETRIES: u32 = 10;
+const ENUMERATION_RETRY_PAUSE: std::time::Duration = std::time::Duration::from_millis(100);
 
 impl TopologySource for Win32Topology {
     fn displays(&self) -> Result<Vec<DisplayDto>, String> {
-        let mut monitors: Vec<HMONITOR> = Vec::new();
-        // SAFETY: `collect_monitor` only casts `data` back to the `Vec` passed here, which outlives the call.
-        let enumerated = unsafe {
-            EnumDisplayMonitors(
-                None,
-                None,
-                Some(collect_monitor),
-                LPARAM(&mut monitors as *mut Vec<HMONITOR> as isize),
-            )
-        };
-        if !enumerated.as_bool() {
-            return Err("EnumDisplayMonitors failed".into());
+        let mut last_error = String::new();
+        for _ in 0..=ENUMERATION_RETRIES {
+            match monitors() {
+                Ok(monitors) => return monitors.into_iter().map(describe).collect(),
+                Err(error) => last_error = error,
+            }
+            std::thread::sleep(ENUMERATION_RETRY_PAUSE);
         }
-        monitors.into_iter().map(describe).collect()
+        Err(last_error)
     }
+}
+
+fn monitors() -> Result<Vec<HMONITOR>, String> {
+    let mut monitors: Vec<HMONITOR> = Vec::new();
+    // SAFETY: `collect_monitor` only casts `data` back to the `Vec` passed here, which outlives the call.
+    let enumerated = unsafe {
+        EnumDisplayMonitors(
+            None,
+            None,
+            Some(collect_monitor),
+            LPARAM(&mut monitors as *mut Vec<HMONITOR> as isize),
+        )
+    };
+    if !enumerated.as_bool() {
+        return Err(format!(
+            "EnumDisplayMonitors failed: {}",
+            windows::core::Error::from_thread()
+        ));
+    }
+    Ok(monitors)
 }
 
 unsafe extern "system" fn collect_monitor(
