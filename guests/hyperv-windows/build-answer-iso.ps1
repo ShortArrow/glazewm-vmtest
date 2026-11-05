@@ -4,14 +4,14 @@ Builds the answer-file ISO that the guest's unattended install reads from its se
 
 .DESCRIPTION
 The ISO holds autounattend.xml, with the image name and the guest password filled in, and the sshd setup that its
-first logon runs: setup-ssh.ps1 and authorized_key.pub. Windows Setup reads autounattend.xml from the root of any
+first logon runs: setup-ssh.ps1, the ssh-key-only.ps1 beside it, and authorized_key.pub. Windows Setup reads autounattend.xml from the root of any
 removable medium. The ISO is written with IMAPI2, which ships with Windows, so no Windows ADK is needed.
 
 .PARAMETER AnswerFile
 autounattend.xml with the placeholders __IMAGE_NAME__ and __GUEST_PASSWORD__.
 
 .PARAMETER SshSetup
-The script the first logon runs to enable sshd; it reads authorized_key.pub from its own folder.
+The script the first logon runs to enable sshd; authorized_key.pub and ssh-key-only.ps1 are read from its own folder.
 
 .PARAMETER AuthorizedKey
 The public key the harness connects with.
@@ -76,6 +76,7 @@ try {
         Replace('__GUEST_PASSWORD__', [Security.SecurityElement]::Escape($GuestPassword)) |
         Set-Content -Encoding UTF8 -NoNewline (Join-Path $staging 'autounattend.xml')
     Copy-Item $SshSetup (Join-Path $staging 'setup-ssh.ps1')
+    Copy-Item (Join-Path (Split-Path $SshSetup) 'ssh-key-only.ps1') (Join-Path $staging 'ssh-key-only.ps1')
     Copy-Item $AuthorizedKey (Join-Path $staging 'authorized_key.pub')
 
     $image = New-Object -ComObject IMAPI2FS.MsftFileSystemImage

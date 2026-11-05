@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-Enables the OpenSSH server in the guest and trusts the harness key for administrators.
+Enables the OpenSSH server in the guest, trusts the harness key for administrators, and refuses passwords.
 
 .DESCRIPTION
 Runs once, from install.bat, at the end of the unattended install.
-Expects authorized_key.pub beside this script.
+Expects authorized_key.pub and ssh-key-only.ps1 beside this script.
 #>
 $ErrorActionPreference = 'Stop'
 
@@ -25,3 +25,5 @@ icacls.exe $authorizedKeys /inheritance:r /grant 'Administrators:F' /grant 'SYST
 
 New-ItemProperty -Path 'HKLM:\SOFTWARE\OpenSSH' -Name DefaultShell `
     -Value 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -PropertyType String -Force
+
+& (Join-Path $PSScriptRoot 'ssh-key-only.ps1')
