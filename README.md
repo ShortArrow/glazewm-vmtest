@@ -34,3 +34,8 @@ Every `*.md` has a Japanese translation beside it as `*.jp.md` ([README.jp.md](R
 ## Status
 
 Phase 0 of docs/ROADMAP.md is in progress. Scenarios run end to end against the Hyper-V guest or the dockur/windows guest: `cargo test -p vmtest-adapters --test live -- --ignored`, after building the guest daemon and glazewm and setting the variables that test's header describes. Spike results are in docs/spikes/, glazewm behaviour found along the way in docs/findings/.
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT), at your option.
+glazewm and zebar, which the harness builds from sibling directories and runs as separate programs, keep their own license, GPL-3.0; nothing of theirs is in this repository.

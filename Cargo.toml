@@ -5,3 +5,4 @@ members = ["crates/adapters", "crates/domain", "crates/guest-client", "crates/gu
 [workspace.package]
 edition = "2024"
 rust-version = "1.97"
+license = "MIT OR Apache-2.0"

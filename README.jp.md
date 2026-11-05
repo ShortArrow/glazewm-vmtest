@@ -34,3 +34,8 @@
 ## 現状
 
 docs/ROADMAP.jp.mdの段階0を進めている。Hyper-Vのゲストかdockur/windowsのゲストに対して、シナリオが端から端まで動く。ゲストデーモンとglazewmをビルドし、そのテストの冒頭にある環境変数を設定してから、`cargo test -p vmtest-adapters --test live -- --ignored`で実行する。検証の結果はdocs/spikes/に、途中で見つけたglazewmの振る舞いはdocs/findings/にある。
+
+## ライセンス
+
+[Apache License, Version 2.0](LICENSE-APACHE)と[MITライセンス](LICENSE-MIT)のどちらかを選んで使える。
+ハーネスが隣のディレクトリからビルドし、別のプログラムとして動かすglazewmとzebarは、それぞれのライセンス（GPL-3.0）のままである。このリポジトリにはそれらのコードを含まない。
