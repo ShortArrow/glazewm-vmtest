@@ -20,7 +20,7 @@ Windowsゲストは、Windows 11 Proのインストールと、それに続く�
 どちらの基盤も、guests/dockur-windowsにある同じものを使う。
 
 - `.env`。`GUEST_PASSWORD=<パスワード>`で`fixture`のパスワードを書く。
-- `.secrets/id_ed25519`。ハーネスが接続に使う鍵で、その公開鍵を`oem/authorized_key.pub`にコピーする。
+- `.secrets/id_ed25519`。ハーネスが接続に使う鍵で、その公開鍵を`oem/authorized_key.pub`にコピーする。WindowsのランナーではOpenSSHが、ほかのユーザーが読める秘密鍵を使わない。`C:\`のようなドライブ直下の権限を引き継いだファイルはこれにあたる。PowerShellで`icacls .secrets\id_ed25519 /inheritance:r /grant:r "${env:USERNAME}:F"`を実行すると、持ち主だけが読めるようになる。cmdでは`${env:USERNAME}`を`%USERNAME%`にする。
 - `.secrets/known_hosts`。ゲストのホスト鍵で、ハーネスが初めて接続したときに記録し、以後の接続のたびに照合する。再インストールするとゲストのホスト鍵が変わるので、このファイルからその行を消す必要がある。
 
 ## Hyper-Vで作り直す

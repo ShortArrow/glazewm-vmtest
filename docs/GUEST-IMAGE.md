@@ -20,7 +20,7 @@ Each snapshot is the one above it plus the listed change.
 Both platforms use the same ones, in guests/dockur-windows:
 
 - `.env` with `GUEST_PASSWORD=<password>`, the password of `fixture`.
-- `.secrets/id_ed25519`, the key the harness connects with; its public key copied to `oem/authorized_key.pub`.
+- `.secrets/id_ed25519`, the key the harness connects with; its public key copied to `oem/authorized_key.pub`. On a Windows runner, OpenSSH ignores a private key that other users can read, which is the case for a file that inherits the permissions of a drive root such as `C:\`; `icacls .secrets\id_ed25519 /inheritance:r /grant:r "${env:USERNAME}:F"` in PowerShell, or with `%USERNAME%` in cmd, leaves only its owner.
 - `.secrets/known_hosts`, the guest's host key, recorded by the harness the first time it connects and checked on every later connection. After a reinstall the guest has a new host key, and its line in this file has to be removed.
 
 ## Rebuilding on Hyper-V
