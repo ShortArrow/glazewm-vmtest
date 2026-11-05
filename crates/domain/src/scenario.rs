@@ -195,6 +195,7 @@ pub struct Observation {
     os_displays: Vec<Rect>,
     test_windows: Vec<TestWindow>,
     glazewm: GlazewmIpc,
+    zebar_running: Option<bool>,
 }
 
 impl Observation {
@@ -213,7 +214,14 @@ impl Observation {
             os_displays,
             test_windows,
             glazewm,
+            zebar_running: None,
         }
+    }
+
+    /// Adds whether the zebar the harness deployed was running; an observation without it is of a guest with no zebar.
+    pub fn with_zebar_running(mut self, running: bool) -> Self {
+        self.zebar_running = Some(running);
+        self
     }
 
     /// The windows the harness opened, ordered by id.
@@ -228,6 +236,11 @@ impl Observation {
 
     pub fn glazewm(&self) -> &GlazewmIpc {
         &self.glazewm
+    }
+
+    /// Whether the deployed zebar was running, or `None` when no zebar was deployed.
+    pub fn zebar_running(&self) -> Option<bool> {
+        self.zebar_running
     }
 }
 

@@ -5,7 +5,7 @@ use std::time::Duration;
 use vmtest_domain::invariant::{
     every_monitor_displays_one_workspace, glazewm_answers_ipc, glazewm_is_running,
     manages_only_existing_top_level_windows, monitor_count_matches,
-    tiled_windows_within_working_area,
+    tiled_windows_within_working_area, zebar_is_running,
 };
 use vmtest_domain::scenario::{
     ActiveLoads, GlazewmIpc, Load, LoadKind, Observation, Scenario, Step, StepOutcome, StepVerdict,
@@ -176,12 +176,14 @@ fn settled_observation(
 
 /// Judges a settled observation; a glazewm that is not running or did not answer has no monitors to compare.
 ///
+/// zebar's liveness is judged whatever glazewm did.
+///
 /// While a load runs, a glazewm that does not answer within the IPC limit is not held to it.
 fn judge(observation: Option<&Observation>, loads: &ActiveLoads) -> StepVerdict {
     let Some(observation) = observation else {
         return StepVerdict::Unsettled;
     };
-    let checked = match observation.glazewm() {
+    let mut checked = match observation.glazewm() {
         GlazewmIpc::Answered(monitors) => vec![
             monitor_count_matches(observation.os_displays().len(), monitors.len()),
             tiled_windows_within_working_area(monitors, observation.test_windows()),
@@ -192,6 +194,7 @@ fn judge(observation: Option<&Observation>, loads: &ActiveLoads) -> StepVerdict 
         GlazewmIpc::NoAnswer => vec![glazewm_answers_ipc(observation.glazewm())],
         GlazewmIpc::NotRunning => vec![glazewm_is_running(observation.glazewm())],
     };
+    checked.push(zebar_is_running(observation.zebar_running()));
     let violations: Vec<_> = checked.into_iter().filter_map(Result::err).collect();
     if violations.is_empty() {
         StepVerdict::Passed
@@ -701,6 +704,28 @@ mod tests {
         assert_eq!(verdicts[0], StepVerdict::Passed);
         assert!(not_running_alone(&verdicts[1]));
         assert!(not_running_alone(&verdicts[2]));
+    }
+
+    #[test]
+    fn reports_a_zebar_that_exits_while_glazewm_keeps_tracking_the_displays() {
+        let mut observations = vec![observed(2, 2).with_zebar_running(true); 6];
+        observations.extend(vec![observed(2, 2).with_zebar_running(false); 6]);
+        let mut guest = FakeGuest::observing(observations);
+
+        let verdicts = verdicts(
+            run(
+                &scenario(vec![Step::TurnDisplaysOff]),
+                &mut guest,
+                &mut FakeClock(Duration::ZERO),
+                SETTLE,
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(verdicts[0], StepVerdict::Passed);
+        assert!(
+            matches!(&verdicts[1], StepVerdict::Violated(v) if v.len() == 1 && v[0].invariant == "zebar_is_running")
+        );
     }
 
     #[test]

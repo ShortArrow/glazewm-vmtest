@@ -17,11 +17,10 @@ Audio redirection gives the guest a playback device that exists only while the c
 
 | Order | Work | Done when |
 |---|---|---|
-| 1 | The runner judges zebar's liveness. The invariant that glazewm and zebar are alive after every step is judged for glazewm only | A scenario that deploys zebar reports a violation when zebar has exited |
-| 2 | The guest image accepts Remote Desktop connections without a firewall rule for them, and has a scheduled task that runs `tscon` as SYSTEM to return the session to the console. On Hyper-V the RDP client reaches the guest's loopback through an SSH port forward; dockur/windows publishes the port on the host's loopback | An RDP client on the runner's machine logs on to the guest, and no other machine can reach the guest's RDP port |
-| 3 | An RDP client adapter: FreeRDP 3 under Xvfb in a container on the runner's machine, with the password given on standard input, the resolution, and audio redirection (`/sound:sys:fake`) as options | The adapter connects and disconnects, and the guest shows a playback device while it is connected |
-| 4 | Steps that connect the RDP client, disconnect it, and return the session to the console, through `SessionController` | The runner's unit tests pass the steps to the port in order |
-| 5 | The scenario itself | It fails with zebar 3.3.1 and passes with zebar built from `../zebar` |
+| 1 | The guest image accepts Remote Desktop connections without a firewall rule for them, and has a scheduled task that runs `tscon` as SYSTEM to return the session to the console. On Hyper-V the RDP client reaches the guest's loopback through an SSH port forward; dockur/windows publishes the port on the host's loopback | An RDP client on the runner's machine logs on to the guest, and no other machine can reach the guest's RDP port |
+| 2 | An RDP client adapter: FreeRDP 3 under Xvfb in a container on the runner's machine, with the password given on standard input, the resolution, and audio redirection (`/sound:sys:fake`) as options | The adapter connects and disconnects, and the guest shows a playback device while it is connected |
+| 3 | Steps that connect the RDP client, disconnect it, and return the session to the console, through `SessionController` | The runner's unit tests pass the steps to the port in order |
+| 4 | The scenario itself | It fails with zebar 3.3.1 and passes with zebar built from `../zebar` |
 
 What the other invariants observe while the session is disconnected is the RDP takeover spike's question; until it is answered, the scenario judges only liveness after the disconnect.
 

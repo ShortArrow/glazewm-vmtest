@@ -326,10 +326,8 @@ impl<H> WindowsGuest<H> {
         }
     }
 
-    fn glazewm_is_running(&mut self) -> Result<bool, String> {
-        let request = Request::SutRunning {
-            program: SutProgram::Glazewm,
-        };
+    fn is_running(&mut self, program: SutProgram) -> Result<bool, String> {
+        let request = Request::SutRunning { program };
         match self.request(&request)? {
             Response::Running { running } => Ok(running),
             other => Err(format!("unexpected answer to sut_running: {other:?}")),
@@ -344,7 +342,7 @@ impl<H> WindowsGuest<H> {
         test_windows: &[(u32, i64)],
     ) -> Result<GlazewmIpc, String> {
         let answer = self.query_glazewm_monitors(ipc_limit, test_windows);
-        if !self.glazewm_is_running()? {
+        if !self.is_running(SutProgram::Glazewm)? {
             return Ok(GlazewmIpc::NotRunning);
         }
         answer
@@ -539,7 +537,11 @@ impl<H> Observer for WindowsGuest<H> {
                 hung: window.hung,
             })
             .collect();
-        Ok(Observation::new(os_displays, test_windows, glazewm))
+        let observation = Observation::new(os_displays, test_windows, glazewm);
+        if self.config.zebar.is_none() {
+            return Ok(observation);
+        }
+        Ok(observation.with_zebar_running(self.is_running(SutProgram::Zebar)?))
     }
 }
 

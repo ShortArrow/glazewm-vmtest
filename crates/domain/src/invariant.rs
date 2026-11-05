@@ -150,6 +150,18 @@ pub fn glazewm_is_running(answer: &GlazewmIpc) -> Result<(), Violation> {
     }
 }
 
+/// Checks that the zebar the harness deployed was running when the guest was observed; a guest without zebar holds it.
+pub fn zebar_is_running(running: Option<bool>) -> Result<(), Violation> {
+    match running {
+        Some(false) => Err(Violation {
+            invariant: "zebar_is_running",
+            expected: "a running zebar process".into(),
+            observed: "no zebar process".into(),
+        }),
+        _ => Ok(()),
+    }
+}
+
 /// Checks that glazewm answered the IPC query within the scenario's time limit.
 ///
 /// A glazewm that is not running was not asked, so `glazewm_is_running` judges it instead.
@@ -359,6 +371,24 @@ mod tests {
                 invariant: "glazewm_is_running",
                 expected: "a running glazewm process".into(),
                 observed: "no glazewm process".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn holds_while_zebar_is_running_or_was_not_deployed() {
+        assert_eq!(zebar_is_running(Some(true)), Ok(()));
+        assert_eq!(zebar_is_running(None), Ok(()));
+    }
+
+    #[test]
+    fn is_violated_when_a_deployed_zebar_is_not_running() {
+        assert_eq!(
+            zebar_is_running(Some(false)),
+            Err(Violation {
+                invariant: "zebar_is_running",
+                expected: "a running zebar process".into(),
+                observed: "no zebar process".into(),
             })
         );
     }

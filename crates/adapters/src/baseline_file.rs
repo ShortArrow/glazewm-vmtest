@@ -54,6 +54,8 @@ struct ObservationFile {
     os_displays: Vec<RectFile>,
     test_windows: Vec<TestWindowFile>,
     glazewm: GlazewmFile,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    zebar_running: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -161,6 +163,7 @@ impl From<&Observation> for ObservationFile {
                 GlazewmIpc::NoAnswer => GlazewmFile::NoAnswer,
                 GlazewmIpc::NotRunning => GlazewmFile::NotRunning,
             },
+            zebar_running: observation.zebar_running(),
         }
     }
 }
@@ -174,7 +177,7 @@ impl From<ObservationFile> for Observation {
             GlazewmFile::NoAnswer => GlazewmIpc::NoAnswer,
             GlazewmFile::NotRunning => GlazewmIpc::NotRunning,
         };
-        Observation::new(
+        let observation = Observation::new(
             file.os_displays.into_iter().map(Rect::from).collect(),
             file.test_windows
                 .into_iter()
@@ -185,7 +188,11 @@ impl From<ObservationFile> for Observation {
                 })
                 .collect(),
             glazewm,
-        )
+        );
+        match file.zebar_running {
+            Some(running) => observation.with_zebar_running(running),
+            None => observation,
+        }
     }
 }
 
@@ -346,6 +353,10 @@ mod tests {
                 None,
                 Some(Observation::new(vec![], vec![], GlazewmIpc::NoAnswer)),
                 Some(Observation::new(vec![RECT], vec![], GlazewmIpc::NotRunning)),
+                Some(
+                    Observation::new(vec![RECT], vec![], GlazewmIpc::NoAnswer)
+                        .with_zebar_running(false),
+                ),
             ],
         };
 
