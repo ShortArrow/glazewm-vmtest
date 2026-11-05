@@ -42,7 +42,22 @@ The guest is the virtual machine `vmtest-win11` on the harness's Hyper-V host.
 
 ## Rebuilding on dockur/windows
 
-The guest is defined by guests/dockur-windows/compose.yaml, and the snapshots live in the qcow2 disk in the Docker volume `glazewm-vmtest-win11-storage`.
+The guest is defined by guests/dockur-windows/compose.yaml, and the snapshots live in the qcow2 disk in the Docker volume `glazewm-vmtest-win11-storage`. The Docker host needs `/dev/kvm`.
 
-1. `docker compose up -d` in guests/dockur-windows and wait until `ssh -p 2222 fixture@127.0.0.1` answers.
+### The Docker host on Hyper-V
+
+The Docker host can be the Linux virtual machine `vmtest-kvm` on the harness's Hyper-V host, with nested virtualization giving it `/dev/kvm`.
+
+1. Download `ubuntu-24.04-server-cloudimg-amd64.img` from https://cloud-images.ubuntu.com/releases/noble/release/ and check it against the `SHA256SUMS` beside it.
+2. Grow it to 160 GB and convert it to a dynamic VHDX, with `qemu-img resize` and `qemu-img convert -O vhdx -o subformat=dynamic` from the `dockurr/windows` image.
+3. Build the seed ISO with `guests/docker-host/build-seed-iso.sh <public key file> seed.iso`, from the public key the runner logs on to the host with. On its first boot the host creates the user `vmtest` with that key and no password, turns password login off, and installs Docker.
+4. Create the virtual machine: generation 2, Secure Boot with the `MicrosoftUEFICertificateAuthority` template, 8 processors with `Set-VMProcessor -ExposeVirtualizationExtensions $true`, 16 GB of static memory, the VHDX, the seed ISO in a DVD drive, the `External` switch, automatic checkpoints off.
+5. Start it and wait until `ssh vmtest@<host address> cloud-init status --wait` reports `done`. `Get-VMNetworkAdapter` lists no address for it, since the image runs no Hyper-V data exchange daemon; the network's DHCP leases or the ARP table give it.
+6. Copy compose.yaml, `.env` and `oem/` from guests/dockur-windows into a directory named `dockur-windows` on the host. Docker Compose names the project after that directory, and the harness's compose commands find the container by that name.
+
+With `VMTEST_DOCKER_HOST=vmtest@<host address>`, the harness runs its docker commands on that host and reaches the guest's SSH port through it.
+
+### The guest
+
+1. `docker compose up -d` in guests/dockur-windows on the Docker host, and wait until `ssh -p 2222 fixture@127.0.0.1` answers there, or `ssh -J vmtest@<host address> -p 2222 fixture@127.0.0.1` from the runner.
 2. For each row of the table: make the change over SSH, shut the guest down from inside (`shutdown /s /t 0`), and create the snapshot with `qemu-img snapshot -c <name> /storage/data.qcow2` from the `dockurr/windows` image, as the dockur-windows skill describes. The scripts in guests/hyperv-windows make the changes for `vdd` and `vcredist`.

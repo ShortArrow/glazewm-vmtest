@@ -5,7 +5,9 @@
 //!
 //! `VMTEST_PLATFORM` picks the guest: `hyperv` (the default) or `dockur`. On Hyper-V, `VMTEST_GUEST_ADDRESS`
 //! is the guest's address, and `VMTEST_HYPERV_HOST`, when set, is the `ssh` destination of the Hyper-V host;
-//! when unset, the Hyper-V host is the machine the tests run on.
+//! when unset, the Hyper-V host is the machine the tests run on. On dockur/windows, `VMTEST_DOCKER_HOST`, when set,
+//! is the `ssh` destination of the Docker host the container runs on, which the harness also reaches the guest
+//! through; when unset, the container runs on the Docker daemon the `docker` command reaches by default.
 //!
 //! A scenario with a baseline compares its observations with baselines/<name>.json. With
 //! `VMTEST_RECORD=1` it records that file instead, from the glazewm commit named by `VMTEST_SUT_COMMIT`.
@@ -94,6 +96,7 @@ fn guest(name: &str, glazewm_config: &str) -> WindowsGuest<Platform> {
         ssh_port: 22,
         ssh_key: dockur.join(".secrets/id_ed25519"),
         user: "fixture".into(),
+        ssh_jump: None,
         daemon_address: "127.0.0.1:17041".into(),
         daemon_forward: Some("127.0.0.1:7041".into()),
         daemon_executable: repository.join("target/release/vmtest-guest-daemon.exe"),
@@ -120,20 +123,25 @@ fn guest(name: &str, glazewm_config: &str) -> WindowsGuest<Platform> {
                 checkpoint: "ssh-key-only".into(),
             }),
         ),
-        Ok("dockur") => WindowsGuest::with_hypervisor(
-            GuestConfig {
-                ssh_host: "127.0.0.1".into(),
-                ssh_port: 2222,
-                ..files
-            },
-            Platform::Dockur(DockurContainer {
-                compose_dir: dockur,
-                service: "windows".into(),
-                volume: "glazewm-vmtest-win11-storage".into(),
-                image: "dockurr/windows:6.06".into(),
-                snapshot: "daemon-task".into(),
-            }),
-        ),
+        Ok("dockur") => {
+            let docker_host = std::env::var("VMTEST_DOCKER_HOST").ok();
+            WindowsGuest::with_hypervisor(
+                GuestConfig {
+                    ssh_host: "127.0.0.1".into(),
+                    ssh_port: 2222,
+                    ssh_jump: docker_host.clone(),
+                    ..files
+                },
+                Platform::Dockur(DockurContainer {
+                    compose_dir: dockur,
+                    service: "windows".into(),
+                    volume: "glazewm-vmtest-win11-storage".into(),
+                    image: "dockurr/windows:6.06".into(),
+                    snapshot: "daemon-task".into(),
+                    docker_host,
+                }),
+            )
+        }
         Ok(other) => panic!("VMTEST_PLATFORM is hyperv or dockur, not {other}"),
     }
 }

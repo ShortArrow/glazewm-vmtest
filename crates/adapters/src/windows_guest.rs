@@ -29,6 +29,9 @@ pub struct GuestConfig {
     pub ssh_port: u16,
     pub ssh_key: PathBuf,
     pub user: String,
+    /// The `ssh` destination that `ssh_host` is reached through, such as the Docker host on whose loopback a
+    /// dockur/windows container publishes the guest's SSH port; `None` connects to `ssh_host` directly.
+    pub ssh_jump: Option<String>,
     /// The address the runner connects to the guest daemon on.
     pub daemon_address: String,
     /// The address the guest daemon listens on inside the guest, when the runner reaches it through an SSH port
@@ -176,7 +179,12 @@ impl<H> WindowsGuest<H> {
     /// reinstall changes it, after which its line in `known_hosts` beside the key has to be removed.
     fn ssh_options(&self) -> Vec<String> {
         let known_hosts = self.config.ssh_key.with_file_name("known_hosts");
-        vec![
+        let jump = self
+            .config
+            .ssh_jump
+            .iter()
+            .flat_map(|jump| ["-J".to_string(), jump.clone()]);
+        let mut options = vec![
             "-q".into(),
             "-o".into(),
             "BatchMode=yes".into(),
@@ -188,7 +196,9 @@ impl<H> WindowsGuest<H> {
             "ConnectTimeout=5".into(),
             "-i".into(),
             self.config.ssh_key.display().to_string(),
-        ]
+        ];
+        options.extend(jump);
+        options
     }
 
     /// Sends a request over the current connection, opening one if there is none.
@@ -687,6 +697,7 @@ mod tests {
                 ssh_port: 22,
                 ssh_key: PathBuf::from("keys/id_ed25519"),
                 user: "fixture".into(),
+                ssh_jump: None,
                 daemon_address: "127.0.0.1:17041".into(),
                 daemon_forward: daemon_forward.map(String::from),
                 daemon_executable: PathBuf::new(),
@@ -817,6 +828,32 @@ mod tests {
         assert!(
             error.contains("Could not request local forwarding."),
             "{error}"
+        );
+    }
+
+    #[test]
+    fn connects_to_the_guest_directly_when_no_jump_is_set() {
+        assert!(!guest(None).ssh_options().contains(&"-J".to_string()));
+    }
+
+    #[test]
+    fn connects_to_the_guest_through_the_jump_when_one_is_set() {
+        let mut guest = guest(Some("127.0.0.1:7041"));
+        guest.config.ssh_jump = Some("vmtest@192.0.2.8".into());
+        let options = guest.ssh_options();
+        let forward = arguments(&guest.daemon_forward_command().unwrap());
+
+        assert!(
+            options
+                .windows(2)
+                .any(|pair| pair == ["-J", "vmtest@192.0.2.8"]),
+            "{options:?}"
+        );
+        assert!(
+            forward
+                .windows(2)
+                .any(|pair| pair == ["-J", "vmtest@192.0.2.8"]),
+            "{forward:?}"
         );
     }
 

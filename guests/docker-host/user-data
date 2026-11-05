@@ -1,0 +1,19 @@
+#cloud-config
+hostname: vmtest-kvm
+groups: [docker]
+users:
+  - name: vmtest
+    groups: [docker]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - __PUBLIC_KEY__
+ssh_pwauth: false
+disable_root: true
+package_update: true
+packages:
+  - docker.io
+  - docker-compose-v2
+runcmd:
+  - systemctl enable --now docker

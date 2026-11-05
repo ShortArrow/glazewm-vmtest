@@ -42,7 +42,22 @@ Windowsゲストは、Windows 11 Proのインストールと、それに続く�
 
 ## dockur/windowsで作り直す
 
-ゲストはguests/dockur-windows/compose.yamlで決まり、スナップショットはDockerのボリューム`glazewm-vmtest-win11-storage`内のqcow2ディスクにある。
+ゲストはguests/dockur-windows/compose.yamlで決まり、スナップショットはDockerのボリューム`glazewm-vmtest-win11-storage`内のqcow2ディスクにある。Dockerホストには`/dev/kvm`が要る。
 
-1. guests/dockur-windowsで`docker compose up -d`を実行し、`ssh -p 2222 fixture@127.0.0.1`が応答するまで待つ。
+### Hyper-V上のDockerホスト
+
+Dockerホストには、ハーネスのHyper-VホストにあるLinuxの仮想マシン`vmtest-kvm`を使える。ネストした仮想化で`/dev/kvm`を持たせる。
+
+1. https://cloud-images.ubuntu.com/releases/noble/release/ から`ubuntu-24.04-server-cloudimg-amd64.img`をダウンロードし、同じ場所の`SHA256SUMS`と照合する。
+2. `dockurr/windows`イメージの`qemu-img resize`で160 GBに広げ、`qemu-img convert -O vhdx -o subformat=dynamic`で容量可変のVHDXに変換する。
+3. ランナーがホストにログオンするときの公開鍵から、`guests/docker-host/build-seed-iso.sh <公開鍵のファイル> seed.iso`でシードISOを作る。ホストは初回起動時に、その鍵でログオンするパスワードなしのユーザー`vmtest`を作り、パスワードでのログインを無効にし、Dockerをインストールする。
+4. 仮想マシンを作る。第2世代、`MicrosoftUEFICertificateAuthority`テンプレートのセキュアブート、`Set-VMProcessor -ExposeVirtualizationExtensions $true`を付けた8プロセッサ、16 GBの静的メモリ、作ったVHDX、DVDドライブにシードISO、`External`スイッチ、自動チェックポイントなし。
+5. 起動し、`ssh vmtest@<ホストのアドレス> cloud-init status --wait`が`done`を返すまで待つ。イメージがHyper-Vのデータ交換デーモンを動かさないので、`Get-VMNetworkAdapter`にはアドレスが出ない。アドレスはネットワークのDHCPのリースかARPテーブルで分かる。
+6. guests/dockur-windowsのcompose.yaml、`.env`、`oem/`を、ホストの`dockur-windows`という名前のディレクトリにコピーする。Docker Composeはそのディレクトリ名をプロジェクト名にし、ハーネスのcomposeコマンドはその名前でコンテナを探す。
+
+`VMTEST_DOCKER_HOST=vmtest@<ホストのアドレス>`を設定すると、ハーネスはdockerのコマンドをそのホストで実行し、ゲストのSSHのポートにもそのホストを経由してつなぐ。
+
+### ゲスト
+
+1. Dockerホストのguests/dockur-windowsで`docker compose up -d`を実行し、そのホストで`ssh -p 2222 fixture@127.0.0.1`が、ランナーからなら`ssh -J vmtest@<ホストのアドレス> -p 2222 fixture@127.0.0.1`が応答するまで待つ。
 2. 表の各行について、SSHで変更を加え、ゲスト内からシャットダウンし（`shutdown /s /t 0`）、`dockurr/windows`イメージの`qemu-img snapshot -c <名前> /storage/data.qcow2`でスナップショットを作る。手順はdockur-windowsスキルのとおり。`vdd`と`vcredist`の変更は、guests/hyperv-windowsのスクリプトで加えられる。
