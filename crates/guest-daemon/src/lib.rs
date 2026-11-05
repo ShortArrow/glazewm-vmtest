@@ -163,6 +163,12 @@ pub fn handle(request: Request, guest: &dyn Guest) -> Response {
     }
 }
 
+/// The address the daemon listens on: `given`, or else the guest's loopback, which the runner reaches through an
+/// SSH port forward and nothing else on the guest's network reaches at all.
+pub fn listen_address(given: Option<String>) -> String {
+    given.unwrap_or_else(|| "127.0.0.1:7041".into())
+}
+
 /// Answers every request line read from `reader` with one response line on `writer`, until end of input.
 ///
 /// A line that is not a valid request is answered with `Response::Error`, and serving continues.
@@ -196,6 +202,16 @@ mod tests {
     struct FixedWindows {
         opened: Result<Vec<u32>, String>,
         windows: Vec<TestWindowDto>,
+    }
+
+    #[test]
+    fn listens_on_the_guests_loopback_when_no_address_is_given() {
+        assert_eq!(listen_address(None), "127.0.0.1:7041");
+    }
+
+    #[test]
+    fn listens_on_the_given_address() {
+        assert_eq!(listen_address(Some("0.0.0.0:7041".into())), "0.0.0.0:7041");
     }
 
     impl TopologySource for FixedWindows {

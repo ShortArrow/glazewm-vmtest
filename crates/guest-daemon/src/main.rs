@@ -1,4 +1,4 @@
-//! Entry point of the guest daemon: `vmtest-guest-daemon [listen-address]`, default `0.0.0.0:7041`.
+//! Entry point of the guest daemon: `vmtest-guest-daemon [listen-address]`, default `127.0.0.1:7041`.
 //!
 //! The SUT is expected beside the daemon's executable: glazewm at `glazewm\glazewm.exe`, its configuration at
 //! `glazewm\config.yaml` and its client at `glazewm\glazewm-cli.exe`, and zebar at `zebar\zebar.exe` with its
@@ -24,7 +24,7 @@ fn main() -> std::io::Result<()> {
     use vmtest_guest_daemon::win32::{self, Win32Topology};
     use vmtest_guest_daemon::{
         CliOutcome, DisplayPower, GlazewmCli, LoadHost, SutProcesses, TestWindowHost,
-        TopologySource, serve,
+        TopologySource, listen_address, serve,
     };
     use vmtest_protocol::{DisplayDto, LoadKindDto, PresenceDto, SutProgram, TestWindowDto};
 
@@ -133,9 +133,7 @@ fn main() -> std::io::Result<()> {
             let _ = writeln!(file, "{message}");
         }
     });
-    let address = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "0.0.0.0:7041".into());
+    let address = listen_address(std::env::args().nth(1));
     if let Err(error) = win32::make_dpi_aware() {
         log(error);
     }

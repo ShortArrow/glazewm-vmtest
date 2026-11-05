@@ -22,7 +22,6 @@ services:
     ports:
       - 127.0.0.1:8006:8006
       - 127.0.0.1:2222:22
-      - 127.0.0.1:7041:7041
     stop_grace_period: 2m
     restart: "no"
 

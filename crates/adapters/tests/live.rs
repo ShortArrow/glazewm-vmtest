@@ -94,8 +94,8 @@ fn guest(name: &str, glazewm_config: &str) -> WindowsGuest<Platform> {
         ssh_port: 22,
         ssh_key: dockur.join(".secrets/id_ed25519"),
         user: "fixture".into(),
-        daemon_address: "127.0.0.1:7041".into(),
-        daemon_forward: None,
+        daemon_address: "127.0.0.1:17041".into(),
+        daemon_forward: Some("127.0.0.1:7041".into()),
         daemon_executable: repository.join("target/release/vmtest-guest-daemon.exe"),
         test_window_executable: repository.join("target/release/vmtest-test-window-win32.exe"),
         load_executable: repository.join("target/release/vmtest-load.exe"),
@@ -111,8 +111,6 @@ fn guest(name: &str, glazewm_config: &str) -> WindowsGuest<Platform> {
             GuestConfig {
                 ssh_host: std::env::var("VMTEST_GUEST_ADDRESS")
                     .expect("VMTEST_GUEST_ADDRESS names the Hyper-V guest's address"),
-                daemon_address: "127.0.0.1:17041".into(),
-                daemon_forward: Some("127.0.0.1:7041".into()),
                 ..files
             },
             Platform::HyperV(HyperVCheckpoint {

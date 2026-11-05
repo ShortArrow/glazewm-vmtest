@@ -12,7 +12,7 @@ Windowsゲストは、Windows 11 Proのインストールと、それに続く�
 | `uac-on` | dockur/windowsだけ。そのインストールはUACをオフにするので、`HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`の`EnableLUA=1`と、再起動を加える。Hyper-VのインストールはUACをオンのまま残すので、Hyper-Vでは`clean`の次が`vdd`になる |
 | `vdd` | VirtualDrivers/Virtual-Display-Driver `25.7.23`。署名者の証明書を`LocalMachine\TrustedPublisher`に登録し、`Root\MttVDD`デバイスを作り、`pnputil`でドライバーを入れ、`C:\VirtualDisplayDriver\vdd_settings.xml`を置く |
 | `vcredist` | Microsoft Visual C++ 2015〜2022 x64再頒布可能パッケージ |
-| `daemon-task` | `C:\vmtest\vmtest-guest-daemon.exe 127.0.0.1:7041`を`fixture`として、対話ログオン種別、`RunLevel Limited`、トリガーなしで実行するスケジュールタスク`vmtest-guest-daemon`。TCP 7041を開けるファイアウォール規則は作らず、ハーネスはSSHのポート転送でデーモンにつなぐ。dockur/windowsでは引数なしで実行して`0.0.0.0:7041`で待ち受け、ファイアウォール規則`vmtest-guest-daemon`でTCP 7041の受信を許す。コンテナがそのポートをホストのループバックにしか公開しないので、ネットワークからは届かない |
+| `daemon-task` | `C:\vmtest\vmtest-guest-daemon.exe 127.0.0.1:7041`を`fixture`として、対話ログオン種別、`RunLevel Limited`、トリガーなしで実行するスケジュールタスク`vmtest-guest-daemon`。TCP 7041を開けるファイアウォール規則は作らず、ハーネスはSSHのポート転送でデーモンにつなぐ。dockur/windowsでは引数なしで実行する。デーモンは引数がなければ同じアドレスで待ち受ける |
 | `rdp` | Hyper-Vのみ。リモートデスクトップ接続を許可し（`fDenyTSConnections=0`）、Remote Desktopのファイアウォール規則はすべて無効のままにする。そのためTCP 3389にはゲスト自身からしか届かず、RDPクライアントはSSHのポート転送でつなぐ。SYSTEMとしてトリガーなしで実行するスケジュールタスク`vmtest-tscon`を置く。このタスクは`tscon`で`fixture`のセッションをコンソールに移す |
 | `ssh-key-only` | Hyper-Vのみ。`guests/dockur-windows/oem/ssh-key-only.ps1`で、sshdが公開鍵でしかログインを受け付けないようにする。`setup-ssh.ps1`も同じスクリプトを実行するので、今の回答ファイルのISOからインストールしたゲストでは、このスナップショットで変わるものはない |
 
