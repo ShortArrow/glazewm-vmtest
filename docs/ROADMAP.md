@@ -10,6 +10,21 @@
 | 3 | Random operation-sequence generation, repeated runs, and test windows for the other UI frameworks, with a JSON Schema generated from the protocol crate and a conformance test that every test-window application passes | A failed generated sequence can be re-run from its record |
 | 4 | Test glazewm on a macOS guest on a Mac host (Virtualization.framework; Tart or similar) | On hold until an Apple Silicon Mac host is available. Starts with a spike on whether a macOS guest can present multiple displays and their hot-plug |
 
+## Phase 1 scenario: RDP disconnect with audio redirection
+
+Given glazewm and zebar running in the interactive session, when an RDP client logs on as the same user with audio redirection and then disconnects, then the zebar process is alive.
+Audio redirection gives the guest a playback device that exists only while the client is connected, so the disconnect removes the default playback device. zebar 3.3.1 fails this scenario; a zebar with a null check on the default device ID passes it.
+
+| Order | Work | Done when |
+|---|---|---|
+| 1 | The runner judges zebar's liveness. The invariant that glazewm and zebar are alive after every step is judged for glazewm only | A scenario that deploys zebar reports a violation when zebar has exited |
+| 2 | The guest image accepts Remote Desktop connections without a firewall rule for them, and has a scheduled task that runs `tscon` as SYSTEM to return the session to the console. On Hyper-V the RDP client reaches the guest's loopback through an SSH port forward; dockur/windows publishes the port on the host's loopback | An RDP client on the runner's machine logs on to the guest, and no other machine can reach the guest's RDP port |
+| 3 | An RDP client adapter: FreeRDP 3 under Xvfb in a container on the runner's machine, with the password given on standard input, the resolution, and audio redirection (`/sound:sys:fake`) as options | The adapter connects and disconnects, and the guest shows a playback device while it is connected |
+| 4 | Steps that connect the RDP client, disconnect it, and return the session to the console, through `SessionController` | The runner's unit tests pass the steps to the port in order |
+| 5 | The scenario itself | It fails with zebar 3.3.1 and passes with zebar built from `../zebar` |
+
+What the other invariants observe while the session is disconnected is the RDP takeover spike's question; until it is answered, the scenario judges only liveness after the disconnect.
+
 ## Spikes
 
 ### Guest session
