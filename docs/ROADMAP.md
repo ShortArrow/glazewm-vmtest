@@ -17,7 +17,7 @@ Audio redirection gives the guest a playback device that exists only while the c
 
 | Order | Work | Done when |
 |---|---|---|
-| 1 | The guest image accepts Remote Desktop connections without a firewall rule for them, and has a scheduled task that runs `tscon` as SYSTEM to return the session to the console. On Hyper-V the RDP client reaches the guest's loopback through an SSH port forward; dockur/windows publishes the port on the host's loopback | An RDP client on the runner's machine logs on to the guest, and no other machine can reach the guest's RDP port |
+| 1 | The dockur/windows guest gets the `rdp` snapshot of docs/GUEST-IMAGE.md, with the container publishing the RDP port on the host's loopback | An RDP client on the runner's machine logs on to the dockur/windows guest, and no other machine can reach its RDP port |
 | 2 | An RDP client adapter: FreeRDP 3 under Xvfb in a container on the runner's machine, with the password given on standard input, the resolution, and audio redirection (`/sound:sys:fake`) as options | The adapter connects and disconnects, and the guest shows a playback device while it is connected |
 | 3 | Steps that connect the RDP client, disconnect it, and return the session to the console, through `SessionController` | The runner's unit tests pass the steps to the port in order |
 | 4 | The scenario itself | It fails with zebar 3.3.1 and passes with zebar built from `../zebar` |
