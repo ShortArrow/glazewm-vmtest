@@ -14,7 +14,7 @@ Windowsのジョブは、ゲストデーモン、テストウィンドウのア�
 | glazewm | リポジトリとコミット | 期待する結果 |
 |---|---|---|
 | `upstream` | glzr-io/glazewmの`5709ad0a`。ベースラインを記録したコミット | `ci/live-expectations/upstream.txt` |
-| `all-fixes` | ShortArrow/glazewmの`vmtest/all-fixes`の`f8dc1eba`。upstreamに、ハーネスで見つけた修正をすべて加えたもの | `ci/live-expectations/all-fixes.txt` |
+| `all-fixes` | ShortArrow/glazewmの`vmtest/all-fixes`の`2f4ff441`。upstreamに、ハーネスで見つけた修正をすべて加えたもの | `ci/live-expectations/all-fixes.txt` |
 
 続いてliveのジョブが、ランナーでそれぞれの期待結果のファイルを渡して`ci/run-live.sh`を順に実行する。スクリプトは、liveシナリオを1本ずつ、1つのゲストで順番に実行する。`fails`と書いたシナリオは失敗しなければならず、`varies`と書いたシナリオは実行せず、ほかのシナリオは成功しなければならない。upstreamのglazewmにまだ残っているバグを再現するシナリオは、`upstream.txt`に`fails`と書き、`all-fixes`では成功する。こうして1回の実行で、バグとその修正の両方を示す。
 

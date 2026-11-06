@@ -14,7 +14,7 @@ The Windows jobs build the guest daemon, the test-window application and the loa
 | glazewm | Repository and commit | Expectations |
 |---|---|---|
 | `upstream` | glzr-io/glazewm `5709ad0a`, the commit the baselines are recorded from | `ci/live-expectations/upstream.txt` |
-| `all-fixes` | ShortArrow/glazewm `vmtest/all-fixes` at `f8dc1eba`, upstream with every fix the harness has led to | `ci/live-expectations/all-fixes.txt` |
+| `all-fixes` | ShortArrow/glazewm `vmtest/all-fixes` at `2f4ff441`, upstream with every fix the harness has led to | `ci/live-expectations/all-fixes.txt` |
 
 The live job then runs `ci/run-live.sh` with each expectations file in turn on the runner. The script runs every live scenario on its own, one after another on the one guest. A scenario listed as `fails` has to fail, one listed as `varies` is not run, and every other scenario has to pass. A scenario that reproduces a bug glazewm still has upstream is listed as `fails` in `upstream.txt` and passes on `all-fixes`, so one run shows the bug and its fix.
 

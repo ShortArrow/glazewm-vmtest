@@ -50,7 +50,7 @@ jobs:
             commit: 5709ad0a3c7c386bbc3e38166a865ffc12937515
           - sut: all-fixes
             repository: ShortArrow/glazewm
-            commit: f8dc1eba478236d4de35b47ca45c3b21e4ca128e
+            commit: 2f4ff4413cf79387d054566f8a4fd99627936344
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -85,7 +85,7 @@ jobs:
             commit: 5709ad0a3c7c386bbc3e38166a865ffc12937515
           - sut: all-fixes
             repository: ShortArrow/glazewm
-            commit: f8dc1eba478236d4de35b47ca45c3b21e4ca128e
+            commit: 2f4ff4413cf79387d054566f8a4fd99627936344
     env:
       VMTEST_PLATFORM: dockur
       RUSTUP_TOOLCHAIN: 1.97.1
