@@ -1,7 +1,7 @@
 name: Live
 
-# The live job runs on a self-hosted runner, so no pull_request trigger: a pull request from a fork must not run
-# its code there.
+# No pull_request trigger, so that a pull request does not run the live scenarios with the code it brings. A pull
+# request can still add a workflow of its own that targets the self-hosted runner; docs/CI.md says who can.
 on:
   push:
     branches: [main]
