@@ -2,6 +2,8 @@
 //!
 //! Needs `cargo build --release -p vmtest-guest-daemon -p vmtest-test-window-win32 -p vmtest-load`, glazewm built into target/sut/glazewm/release
 //! (or the directory named by `VMTEST_GLAZEWM_BUILD`), and the guest.
+//! A scenario that deploys zebar also needs zebar built into target/sut/zebar/release (or the directory named by
+//! `VMTEST_ZEBAR_BUILD`), with zebar checked out beside this repository for its resources.
 //!
 //! `VMTEST_PLATFORM` picks the guest: `hyperv` (the default) or `dockur`. On Hyper-V, `VMTEST_GUEST_ADDRESS`
 //! is the guest's address, and `VMTEST_HYPERV_HOST`, when set, is the `ssh` destination of the Hyper-V host;
@@ -20,7 +22,7 @@ use vmtest_adapters::dockur::DockurContainer;
 use vmtest_adapters::glazewm::config_without_startup_commands;
 use vmtest_adapters::hyperv::{HyperVCheckpoint, HyperVHost};
 use vmtest_adapters::powershell::encoded_command;
-use vmtest_adapters::windows_guest::{GuestConfig, SystemClock, WindowsGuest};
+use vmtest_adapters::windows_guest::{GuestConfig, SystemClock, WindowsGuest, ZebarBuild};
 use vmtest_domain::baseline::{Baseline, Deviation};
 use vmtest_domain::scenario::{
     DEFAULT_IPC_LIMIT, Load, LoadKind, Observation, Scenario, Step, StepVerdict, TestWindowBatch,
@@ -143,6 +145,19 @@ fn guest(name: &str, glazewm_config: &str) -> WindowsGuest<Platform> {
             )
         }
         Ok(other) => panic!("VMTEST_PLATFORM is hyperv or dockur, not {other}"),
+    }
+}
+
+/// zebar built from `../zebar`, whose first run installs its starter widgets.
+fn zebar() -> ZebarBuild {
+    let repository = repository();
+    let build = std::env::var_os("VMTEST_ZEBAR_BUILD")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repository.join("target/sut/zebar/release"));
+    ZebarBuild {
+        executable: build.join("zebar.exe"),
+        resources: repository.join("../zebar/resources"),
+        config: None,
     }
 }
 
@@ -419,4 +434,26 @@ fn reports_a_glazewm_that_exits_as_not_running() {
         matches!(&verdicts[1], StepVerdict::Violated(v) if v.len() == 1 && v[0].invariant == "glazewm_is_running"),
         "{verdicts:?}"
     );
+}
+
+#[test]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
+fn zebar_keeps_running_across_monitor_count_changes() {
+    let scenario = Scenario {
+        name: "zebar across monitor count changes".into(),
+        virtual_monitors: 1,
+        steps: vec![
+            Step::SetVirtualMonitorCount(3),
+            Step::SetVirtualMonitorCount(1),
+            Step::RemoveVirtualMonitors,
+            Step::RestoreVirtualMonitors,
+        ],
+        ipc_limit: DEFAULT_IPC_LIMIT,
+    };
+    let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config()).with_zebar(zebar());
+
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    assert_eq!(verdicts, vec![StepVerdict::Passed; 5]);
 }
