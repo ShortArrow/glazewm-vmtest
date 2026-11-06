@@ -30,6 +30,6 @@ The runner is the Docker host of docs/GUEST-IMAGE.md, `vmtest-kvm`, with the doc
 4. Give it the guest's password and SSH key, readable by `runner` alone, in `/home/runner/vmtest-secrets`: `.env` from guests/dockur-windows, and the private key that guests/dockur-windows/.secrets holds as `id_ed25519`. The live job copies both into its checkout and removes them when it ends.
 5. Download the runner from https://github.com/actions/runner/releases into `/home/runner/actions-runner`, check it against the SHA-256 in the release notes, and run `sudo /home/runner/actions-runner/bin/installdependencies.sh`.
 6. Register it with a registration token from the repository's Settings → Actions → Runners → New self-hosted runner, as `runner` in `/home/runner/actions-runner`: `./config.sh --unattended --url https://github.com/ShortArrow/glazewm-vmtest --token <token> --name vmtest-kvm --labels vmtest-kvm`.
-7. Install it as a service that runs as `runner`: `sudo ./svc.sh install runner` and `sudo ./svc.sh start` in `/home/runner/actions-runner`.
+7. Install it as a service that runs as `runner`: `sudo sh -c 'cd /home/runner/actions-runner && ./svc.sh install runner && ./svc.sh start'`. `vmtest` cannot enter `/home/runner` itself, so the `cd` runs under `sudo`.
 
 The runner reaches GitHub over outbound HTTPS and listens on no port.

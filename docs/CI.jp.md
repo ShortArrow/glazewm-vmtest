@@ -30,6 +30,6 @@ liveのワークフローには`pull_request`のトリガーがないので、�
 4. ゲストのパスワードとSSHの鍵を、`runner`だけが読める`/home/runner/vmtest-secrets`に置く。guests/dockur-windowsの`.env`と、guests/dockur-windows/.secretsにある秘密鍵を`id_ed25519`として置く。liveのジョブは両方を自分のチェックアウトにコピーし、終わるときに消す。
 5. https://github.com/actions/runner/releases からランナーを`/home/runner/actions-runner`にダウンロードし、リリースノートのSHA-256と照合し、`sudo /home/runner/actions-runner/bin/installdependencies.sh`を実行する。
 6. リポジトリのSettings → Actions → Runners → New self-hosted runnerで得た登録トークンで、`runner`として`/home/runner/actions-runner`で登録する。`./config.sh --unattended --url https://github.com/ShortArrow/glazewm-vmtest --token <トークン> --name vmtest-kvm --labels vmtest-kvm`。
-7. `runner`で動くサービスとして入れる。`/home/runner/actions-runner`で`sudo ./svc.sh install runner`と`sudo ./svc.sh start`。
+7. `runner`で動くサービスとして入れる。`sudo sh -c 'cd /home/runner/actions-runner && ./svc.sh install runner && ./svc.sh start'`。`vmtest`は`/home/runner`に入れないので、`cd`も`sudo`の中で実行する。
 
 ランナーはGitHubへ外向きのHTTPSでつなぎ、どのポートでも待ち受けない。
