@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::thread::sleep;
+use std::time::{Duration, Instant};
 
 use vmtest_runner::Hypervisor;
 
@@ -24,6 +26,61 @@ pub struct DockurContainer {
 impl DockurContainer {
     fn docker(&self, args: &[&str]) -> Result<(), String> {
         run(&mut self.docker_command(args))
+    }
+
+    fn docker_output(&self, args: &[&str]) -> Result<String, String> {
+        let mut command = self.docker_command(args);
+        let output = command
+            .output()
+            .map_err(|error| format!("cannot start {command:?}: {error}"))?;
+        if output.status.success() {
+            Ok(format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ))
+        } else {
+            Err(format!(
+                "{command:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))
+        }
+    }
+
+    /// The boot that follows starting the container, read from the container's state and its log since that start.
+    fn boot(&self) -> Result<Boot, String> {
+        let id = self.docker_output(&["compose", "ps", "-a", "-q", &self.service])?;
+        let state = self.docker_output(&[
+            "inspect",
+            "-f",
+            "{{.State.Running}} {{.State.StartedAt}}",
+            id.trim(),
+        ])?;
+        let (running, started_at) = state
+            .trim()
+            .split_once(' ')
+            .ok_or_else(|| format!("unexpected container state {state:?}"))?;
+        let log = self.docker_output(&["logs", "--since", started_at, id.trim()])?;
+        Ok(boot_outcome(&log, running == "true"))
+    }
+
+    /// Starts the container until QEMU boots Windows, starting it again after a boot that dockur/windows gave up on.
+    fn start_until_booted(&self) -> Result<(), String> {
+        for _ in 0..BOOT_ATTEMPTS {
+            self.docker(&["compose", "start", &self.service])?;
+            let deadline = Instant::now() + BOOT_LIMIT;
+            loop {
+                match self.boot()? {
+                    Boot::Started => return Ok(()),
+                    Boot::Failed => break,
+                    Boot::Booting if Instant::now() < deadline => sleep(BOOT_POLL),
+                    Boot::Booting => {
+                        return Err(format!("QEMU did not boot Windows within {BOOT_LIMIT:?}"));
+                    }
+                }
+            }
+        }
+        Err(format!("QEMU failed to boot Windows {BOOT_ATTEMPTS} times"))
     }
 
     fn docker_command(&self, args: &[&str]) -> Command {
@@ -53,7 +110,34 @@ impl Hypervisor for DockurContainer {
             &self.snapshot,
             "/storage/data.qcow2",
         ])?;
-        self.docker(&["compose", "start", &self.service])
+        self.start_until_booted()
+    }
+}
+
+/// How many times the container is started before a restore gives up on QEMU booting Windows.
+const BOOT_ATTEMPTS: usize = 3;
+/// How long one start waits for the boot; dockur/windows itself gives up 30 seconds after starting QEMU.
+const BOOT_LIMIT: Duration = Duration::from_secs(120);
+const BOOT_POLL: Duration = Duration::from_secs(2);
+
+/// What the container's log since its last start says about QEMU booting Windows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Boot {
+    Booting,
+    Started,
+    Failed,
+}
+
+/// The boot's state from `log`, the container's log since its last start, and whether the container is running.
+///
+/// dockur/windows logs "Windows started successfully" once QEMU has booted, and stops the container when it gives up.
+fn boot_outcome(log: &str, running: bool) -> Boot {
+    if log.contains("Windows started successfully") {
+        Boot::Started
+    } else if running {
+        Boot::Booting
+    } else {
+        Boot::Failed
     }
 }
 
@@ -79,6 +163,27 @@ mod tests {
             .get_envs()
             .find(|(name, _)| *name == "DOCKER_HOST")
             .map(|(_, value)| value)
+    }
+
+    #[test]
+    fn a_running_container_without_the_started_line_is_still_booting() {
+        let log = "❯ Booting Windows using QEMU v11.1.1...\n";
+
+        assert_eq!(boot_outcome(log, true), Boot::Booting);
+    }
+
+    #[test]
+    fn the_started_line_means_windows_started() {
+        let log = "❯ Booting Windows using QEMU v11.1.1...\n❯ Windows started successfully, visit http://127.0.0.1:8006/ to view the screen...\n";
+
+        assert_eq!(boot_outcome(log, true), Boot::Started);
+    }
+
+    #[test]
+    fn a_container_that_stopped_before_the_started_line_failed_to_boot() {
+        let log = "❯ Booting Windows using QEMU v11.1.1...\n❯ ERROR: Timeout while waiting for QEMU to boot the machine, terminating...\n";
+
+        assert_eq!(boot_outcome(log, false), Boot::Failed);
     }
 
     #[test]
