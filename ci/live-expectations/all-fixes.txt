@@ -1,0 +1,1 @@
+# ShortArrow/glazewm vmtest/all-fixes at the commit the live workflow builds: every scenario passes.

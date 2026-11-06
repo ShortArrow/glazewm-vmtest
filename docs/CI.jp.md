@@ -1,0 +1,35 @@
+# CI
+
+ハーネスは2つのGitHub Actionsのワークフローで確かめる。
+
+| ワークフロー | 起動する条件 | 実行する場所 | 確かめること |
+|---|---|---|---|
+| `.github/workflows/ci.yml` | `main`へのプッシュと、すべてのプルリクエスト | `windows-latest` | `cargo fmt --check`、`cargo clippy -D warnings`、ゲストの要らないテスト |
+| `.github/workflows/live.yml` | `main`へのプッシュと、手動 | ビルドは`windows-latest`、その後セルフホストのランナー`vmtest-kvm` | dockur/windowsのゲストに対するすべてのliveシナリオを、下のglazewmごとに1回ずつ |
+
+## liveのワークフロー
+
+Windowsのジョブは、ゲストデーモン、テストウィンドウのアプリケーション、負荷生成プログラムを1回ビルドし、glazewmを次のコミットごとに、ワークフローが固定したnightlyのツールチェーンでビルドする。
+
+| glazewm | リポジトリとコミット | 期待する結果 |
+|---|---|---|
+| `upstream` | glzr-io/glazewmの`5709ad0a`。ベースラインを記録したコミット | `ci/live-expectations/upstream.txt` |
+| `all-fixes` | ShortArrow/glazewmの`vmtest/all-fixes`の`f8dc1eba`。upstreamに、ハーネスで見つけた修正をすべて加えたもの | `ci/live-expectations/all-fixes.txt` |
+
+続いてliveのジョブが、ランナーでそれぞれの期待結果のファイルを渡して`ci/run-live.sh`を順に実行する。スクリプトは、liveシナリオを1本ずつ、1つのゲストで順番に実行する。`fails`と書いたシナリオは失敗しなければならず、`varies`と書いたシナリオは実行せず、ほかのシナリオは成功しなければならない。upstreamのglazewmにまだ残っているバグを再現するシナリオは、`upstream.txt`に`fails`と書き、`all-fixes`では成功する。こうして1回の実行で、バグとその修正の両方を示す。
+
+liveのワークフローには`pull_request`のトリガーがないので、フォークからのプルリクエストがセルフホストのランナーで動くことはない。
+
+## セルフホストのランナー
+
+ランナーは、docs/GUEST-IMAGE.jp.mdのDockerホスト`vmtest-kvm`で、その上にdockur/windowsのゲストを作ってある。ランナーはユーザー`runner`で動く。このユーザーは`docker`グループに属し、`sudo`は使えない。以下の手順は`vmtest`で実行する。
+
+1. ビルドに要るものを入れる。`sudo apt-get install -y build-essential pkg-config curl`。
+2. ユーザーを作る。`sudo useradd --create-home --shell /bin/bash --groups docker runner`と`sudo passwd -l runner`。
+3. そのユーザーにRustを入れる。`runner`で`curl --proto =https --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.97.1`。
+4. ゲストのパスワードとSSHの鍵を、`runner`だけが読める`/home/runner/vmtest-secrets`に置く。guests/dockur-windowsの`.env`と、guests/dockur-windows/.secretsにある秘密鍵を`id_ed25519`として置く。liveのジョブは両方を自分のチェックアウトにコピーし、終わるときに消す。
+5. https://github.com/actions/runner/releases からランナーを`/home/runner/actions-runner`にダウンロードし、リリースノートのSHA-256と照合し、`sudo /home/runner/actions-runner/bin/installdependencies.sh`を実行する。
+6. リポジトリのSettings → Actions → Runners → New self-hosted runnerで得た登録トークンで、`runner`として`/home/runner/actions-runner`で登録する。`./config.sh --unattended --url https://github.com/ShortArrow/glazewm-vmtest --token <トークン> --name vmtest-kvm --labels vmtest-kvm`。
+7. `runner`で動くサービスとして入れる。`/home/runner/actions-runner`で`sudo ./svc.sh install runner`と`sudo ./svc.sh start`。
+
+ランナーはGitHubへ外向きのHTTPSでつなぎ、どのポートでも待ち受けない。

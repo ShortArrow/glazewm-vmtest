@@ -1,0 +1,125 @@
+name: Live
+
+# The live job runs on a self-hosted runner, so no pull_request trigger: a pull request from a fork must not run
+# its code there.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: 1.97.1
+  GLAZEWM_TOOLCHAIN: nightly-2026-02-22
+
+jobs:
+  guest-binaries:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the Rust toolchain
+        run: |
+          rustup toolchain install $env:RUST_TOOLCHAIN --profile minimal
+          rustup override set $env:RUST_TOOLCHAIN
+      - run: cargo build --release --locked -p vmtest-guest-daemon -p vmtest-test-window-win32 -p vmtest-load
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: guest-binaries
+          path: |
+            target/release/vmtest-guest-daemon.exe
+            target/release/vmtest-test-window-win32.exe
+            target/release/vmtest-load.exe
+          if-no-files-found: error
+
+  glazewm:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - sut: upstream
+            repository: glzr-io/glazewm
+            commit: 5709ad0a3c7c386bbc3e38166a865ffc12937515
+          - sut: all-fixes
+            repository: ShortArrow/glazewm
+            commit: f8dc1eba478236d4de35b47ca45c3b21e4ca128e
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ matrix.repository }}
+          ref: ${{ matrix.commit }}
+          persist-credentials: false
+      - name: Install the Rust toolchain
+        run: |
+          rustup toolchain install $env:GLAZEWM_TOOLCHAIN --profile minimal
+          rustup override set $env:GLAZEWM_TOOLCHAIN
+      - run: cargo build --release --locked -p wm -p wm-cli -p wm-watcher
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: glazewm-${{ matrix.sut }}
+          path: |
+            target/release/glazewm.exe
+            target/release/glazewm-cli.exe
+            target/release/glazewm-watcher.exe
+          if-no-files-found: error
+
+  live:
+    needs: [guest-binaries, glazewm]
+    runs-on: [self-hosted, linux, vmtest-kvm]
+    timeout-minutes: 180
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        include:
+          - sut: upstream
+            repository: glzr-io/glazewm
+            commit: 5709ad0a3c7c386bbc3e38166a865ffc12937515
+          - sut: all-fixes
+            repository: ShortArrow/glazewm
+            commit: f8dc1eba478236d4de35b47ca45c3b21e4ca128e
+    env:
+      VMTEST_PLATFORM: dockur
+      RUSTUP_TOOLCHAIN: 1.97.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: glazewm-vmtest
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ matrix.repository }}
+          ref: ${{ matrix.commit }}
+          path: glazewm
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: guest-binaries
+          path: glazewm-vmtest/target/release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: glazewm-${{ matrix.sut }}
+          path: glazewm-vmtest/target/sut/glazewm/release
+      - name: Copy the guest's password and SSH key from the runner
+        working-directory: glazewm-vmtest/guests/dockur-windows
+        run: |
+          install -m 600 ~/vmtest-secrets/.env .env
+          install -d -m 700 .secrets
+          install -m 600 ~/vmtest-secrets/id_ed25519 .secrets/id_ed25519
+      - name: Run the live scenarios
+        working-directory: glazewm-vmtest
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          sh ci/run-live.sh ci/live-expectations/${{ matrix.sut }}.txt
+      - name: Remove the guest's password and SSH key
+        if: always()
+        working-directory: glazewm-vmtest/guests/dockur-windows
+        run: rm -rf .env .secrets

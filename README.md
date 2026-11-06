@@ -27,6 +27,7 @@ The harness builds the targets on the host and deploys only the build output to 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — structure, dependency direction, design intent
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phases, spikes, open questions
 - [docs/GUEST-IMAGE.md](docs/GUEST-IMAGE.md) — how the Windows guest and its snapshots are built
+- [docs/CI.md](docs/CI.md) — the CI workflows and the self-hosted runner the live scenarios run on
 - [docs/ADR/](docs/ADR/) — decisions between alternatives, with their reasons
 
 Every `*.md` has a Japanese translation beside it as `*.jp.md` ([README.jp.md](README.jp.md)). Where the two differ, the English file applies.

@@ -27,6 +27,7 @@
 - [docs/ARCHITECTURE.jp.md](docs/ARCHITECTURE.jp.md) — 構成、依存方向、設計意図
 - [docs/ROADMAP.jp.md](docs/ROADMAP.jp.md) — 段階計画、検証項目、未決事項
 - [docs/GUEST-IMAGE.jp.md](docs/GUEST-IMAGE.jp.md) — Windowsゲストとスナップショットの作り方
+- [docs/CI.jp.md](docs/CI.jp.md) — CIのワークフローと、liveシナリオを実行するセルフホストのランナー
 - [docs/ADR/](docs/ADR/) — 複数案から選んだ決定とその理由
 
 どの`*.md`にも、日本語訳の`*.jp.md`が隣にある（英語版は[README.md](README.md)）。内容が食い違うときは英語版に従う。
