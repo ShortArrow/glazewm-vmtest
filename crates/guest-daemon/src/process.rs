@@ -17,8 +17,9 @@ pub struct ProcessGlazewmCli {
 }
 
 /// A SUT program the harness deployed into a directory named after it: glazewm with the `config.yaml` there,
-/// zebar with the `config` directory there and the deployed glazewm first on its `PATH`, where an installed
-/// glazewm would be, so that zebar's first run picks the starter widget that shows glazewm. Started, it writes its output to `stdout.log` and `stderr.log` there,
+/// and zebar with the `config` directory there. Both have the deployed glazewm first on their `PATH`, where an
+/// installed glazewm would be, so that zebar's first run picks the starter widget that shows glazewm, whether the
+/// daemon starts zebar or glazewm does. Started, it writes its output to `stdout.log` and `stderr.log` there,
 /// with a backtrace if it panics.
 pub struct DeployedSut {
     base: PathBuf,
@@ -57,10 +58,10 @@ impl DeployedSut {
             SutProgram::Zebar => command
                 .arg("startup")
                 .arg("--config-dir")
-                .arg(self.directory.join("config"))
-                .env("PATH", self.path_with_glazewm_first()),
+                .arg(self.directory.join("config")),
         };
         command
+            .env("PATH", self.path_with_glazewm_first())
             .current_dir(&self.directory)
             .env("RUST_BACKTRACE", "1");
         without_window(&mut command);
@@ -207,19 +208,26 @@ mod tests {
         );
     }
 
+    fn first_on_path(command: &Command) -> Option<PathBuf> {
+        let path = command
+            .get_envs()
+            .find_map(|(name, value)| (name == "PATH").then_some(value))
+            .flatten()?;
+        std::env::split_paths(path).next()
+    }
+
     #[test]
     fn zebar_finds_the_deployed_glazewm_on_its_path_first() {
         let command = DeployedSut::new(Path::new(r"C:\vmtest"), SutProgram::Zebar).command();
 
-        let path = command
-            .get_envs()
-            .find_map(|(name, value)| (name == "PATH").then_some(value))
-            .flatten()
-            .unwrap();
-        assert_eq!(
-            std::env::split_paths(path).next(),
-            Some(r"C:\vmtest\glazewm".into())
-        );
+        assert_eq!(first_on_path(&command), Some(r"C:\vmtest\glazewm".into()));
+    }
+
+    #[test]
+    fn a_zebar_that_glazewm_starts_finds_the_deployed_glazewm_on_its_path_first() {
+        let command = DeployedSut::new(Path::new(r"C:\vmtest"), SutProgram::Glazewm).command();
+
+        assert_eq!(first_on_path(&command), Some(r"C:\vmtest\glazewm".into()));
     }
 
     #[test]
