@@ -62,6 +62,17 @@ pub struct ZebarBuild {
     pub executable: PathBuf,
     pub resources: PathBuf,
     pub config: Option<PathBuf>,
+    pub launch: ZebarLaunch,
+}
+
+/// What starts zebar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZebarLaunch {
+    /// glazewm, through its startup commands, as glazewm's sample configuration does with an installed zebar; glazewm
+    /// also stops it when it exits. zebar's output is not kept.
+    Glazewm,
+    /// The guest daemon, once glazewm answers IPC, keeping zebar's output in `stdout.log` and `stderr.log`.
+    GuestDaemon,
 }
 
 /// The runner's ports for one Windows guest, restored by `H`.
@@ -327,6 +338,27 @@ impl<H> WindowsGuest<H> {
         )
     }
 
+    /// Writes the glazewm configuration with glazewm starting the deployed zebar, beside the configuration it is made
+    /// from, and returns its path.
+    fn glazewm_config_starting_zebar(&self) -> Result<PathBuf, String> {
+        let source = &self.config.glazewm_config;
+        let config = std::fs::read_to_string(source).map_err(|error| {
+            format!(
+                "cannot read glazewm's configuration at {}: {error}",
+                source.display()
+            )
+        })?;
+        let starting_zebar = glazewm::config_starting_zebar(
+            &config,
+            r"C:\vmtest\zebar\zebar.exe",
+            r"C:\vmtest\zebar\config",
+        );
+        let path = source.with_extension("starting-zebar.yaml");
+        std::fs::write(&path, starting_zebar)
+            .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+        Ok(path)
+    }
+
     fn set_display_power(&mut self, on: bool) -> Result<(), String> {
         match self.request(&Request::SetDisplayPower { on })? {
             Response::DisplayPowerSet { on: set } if set == on => Ok(()),
@@ -417,16 +449,20 @@ impl<H> GuestExecutor for WindowsGuest<H> {
             build.join("glazewm-watcher.exe"),
         ];
         self.scp(&binaries.iter().collect::<Vec<_>>(), "C:/vmtest/glazewm/")?;
-        self.scp(
-            &[&self.config.glazewm_config.clone()],
-            "C:/vmtest/glazewm/config.yaml",
-        )?;
+        let zebar = self.config.zebar.clone();
+        if let Some(zebar) = &zebar {
+            self.deploy_zebar(zebar)?;
+        }
+        let glazewm_config = match zebar.as_ref().map(|zebar| zebar.launch) {
+            Some(ZebarLaunch::Glazewm) => self.glazewm_config_starting_zebar()?,
+            _ => self.config.glazewm_config.clone(),
+        };
+        self.scp(&[&glazewm_config], "C:/vmtest/glazewm/config.yaml")?;
         self.start(SutProgram::Glazewm)?;
         poll(Duration::from_secs(60), "glazewm to take a query", || {
             self.query_glazewm_monitors(ipc_limit, &[]).map(|_| ())
         })?;
-        if let Some(zebar) = self.config.zebar.clone() {
-            self.deploy_zebar(&zebar)?;
+        if zebar.is_some_and(|zebar| zebar.launch == ZebarLaunch::GuestDaemon) {
             self.start(SutProgram::Zebar)?;
         }
         Ok(())

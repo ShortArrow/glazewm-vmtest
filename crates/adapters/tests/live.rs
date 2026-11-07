@@ -22,7 +22,9 @@ use vmtest_adapters::dockur::DockurContainer;
 use vmtest_adapters::glazewm::config_without_startup_commands;
 use vmtest_adapters::hyperv::{HyperVCheckpoint, HyperVHost};
 use vmtest_adapters::powershell::encoded_command;
-use vmtest_adapters::windows_guest::{GuestConfig, SystemClock, WindowsGuest, ZebarBuild};
+use vmtest_adapters::windows_guest::{
+    GuestConfig, SystemClock, WindowsGuest, ZebarBuild, ZebarLaunch,
+};
 use vmtest_domain::baseline::{Baseline, Deviation};
 use vmtest_domain::scenario::{
     DEFAULT_IPC_LIMIT, Load, LoadKind, Observation, Scenario, Step, StepVerdict, TestWindowBatch,
@@ -148,7 +150,8 @@ fn guest(name: &str, glazewm_config: &str) -> WindowsGuest<Platform> {
     }
 }
 
-/// zebar built from `../zebar`, whose first run installs its starter widgets.
+/// zebar built from `../zebar`, started by glazewm as an installed zebar is, whose first run installs its starter
+/// widgets.
 fn zebar() -> ZebarBuild {
     let repository = repository();
     let build = std::env::var_os("VMTEST_ZEBAR_BUILD")
@@ -158,6 +161,7 @@ fn zebar() -> ZebarBuild {
         executable: build.join("zebar.exe"),
         resources: repository.join("../zebar/resources"),
         config: None,
+        launch: ZebarLaunch::Glazewm,
     }
 }
 

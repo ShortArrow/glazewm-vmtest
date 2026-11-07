@@ -191,6 +191,26 @@ pub fn config_without_startup_commands(sample: &str) -> String {
         .collect()
 }
 
+/// Returns `config` with glazewm starting zebar from `executable` with its configuration in `config_dir`, and stopping
+/// it when glazewm exits, as glazewm's sample configuration does with an installed zebar.
+///
+/// `config` is one whose startup and shutdown commands [`config_without_startup_commands`] has emptied.
+pub fn config_starting_zebar(config: &str, executable: &str, config_dir: &str) -> String {
+    config
+        .replacen(
+            "startup_commands: []",
+            &format!(
+                "startup_commands: ['shell-exec {executable} startup --config-dir {config_dir}']"
+            ),
+            1,
+        )
+        .replacen(
+            "shutdown_commands: []",
+            "shutdown_commands: ['shell-exec taskkill /IM zebar.exe /F']",
+            1,
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,6 +250,32 @@ mod tests {
   startup_commands: []
 
   shutdown_commands: []
+
+  config_reload_commands: []
+"
+        );
+    }
+
+    #[test]
+    fn starts_zebar_with_its_configuration_and_stops_it_on_exit() {
+        let quiet = "general:
+  startup_commands: []
+
+  shutdown_commands: []
+
+  config_reload_commands: []
+";
+
+        assert_eq!(
+            config_starting_zebar(
+                quiet,
+                r"C:\vmtest\zebar\zebar.exe",
+                r"C:\vmtest\zebar\config"
+            ),
+            r"general:
+  startup_commands: ['shell-exec C:\vmtest\zebar\zebar.exe startup --config-dir C:\vmtest\zebar\config']
+
+  shutdown_commands: ['shell-exec taskkill /IM zebar.exe /F']
 
   config_reload_commands: []
 "
