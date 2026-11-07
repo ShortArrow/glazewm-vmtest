@@ -20,11 +20,12 @@ use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_MOVE, MOUSEINPUT, SendInput,
+    INPUT, INPUT_0, INPUT_MOUSE, MOUSE_EVENT_FLAGS, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+    MOUSEEVENTF_MOVE, MOUSEINPUT, SendInput,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_STYLE, GetWindowLongPtrW, HWND_BROADCAST, IsWindow, PostMessageW, SC_MONITORPOWER,
-    WM_SYSCOMMAND, WS_CHILD,
+    GWL_STYLE, GetForegroundWindow, GetWindowLongPtrW, HWND_BROADCAST, IsWindow, PostMessageW,
+    SC_MONITORPOWER, SetCursorPos, WM_SYSCOMMAND, WS_CHILD,
 };
 use windows::core::{BOOL, PWSTR};
 
@@ -44,17 +45,7 @@ pub fn set_display_power(on: bool) -> Result<(), String> {
                 },
             },
         };
-        let inputs = [nudge(1), nudge(-1)];
-        let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
-        if sent as usize == inputs.len() {
-            Ok(())
-        } else {
-            Err(format!(
-                "SendInput sent {sent} of {} inputs: {}",
-                inputs.len(),
-                windows::core::Error::from_thread()
-            ))
-        }
+        send(&[nudge(1), nudge(-1)])
     } else {
         const MONITOR_OFF: isize = 2;
         unsafe {
@@ -66,6 +57,42 @@ pub fn set_display_power(on: bool) -> Result<(), String> {
             )
         }
         .map_err(|error| format!("cannot ask the windows to turn the displays off: {error}"))
+    }
+}
+
+/// Moves the mouse to `x`, `y` and clicks the left button there; the process is DPI aware, so the point is in
+/// physical pixels.
+pub fn click(x: i32, y: i32) -> Result<(), String> {
+    unsafe { SetCursorPos(x, y) }
+        .map_err(|error| format!("cannot move the mouse to {x}, {y}: {error}"))?;
+    let button = |flags: MOUSE_EVENT_FLAGS| INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dwFlags: flags,
+                ..Default::default()
+            },
+        },
+    };
+    send(&[button(MOUSEEVENTF_LEFTDOWN), button(MOUSEEVENTF_LEFTUP)])
+}
+
+/// The handle of the foreground window, or `None` when no window is in the foreground.
+pub fn foreground_window() -> Option<i64> {
+    let window = unsafe { GetForegroundWindow() };
+    (!window.is_invalid()).then_some(window.0 as i64)
+}
+
+fn send(inputs: &[INPUT]) -> Result<(), String> {
+    let sent = unsafe { SendInput(inputs, std::mem::size_of::<INPUT>() as i32) };
+    if sent as usize == inputs.len() {
+        Ok(())
+    } else {
+        Err(format!(
+            "SendInput sent {sent} of {} inputs: {}",
+            inputs.len(),
+            windows::core::Error::from_thread()
+        ))
     }
 }
 

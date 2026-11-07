@@ -55,6 +55,12 @@ pub trait WorkloadController {
     fn stop_load(&mut self, kind: LoadKind) -> Result<(), String>;
 }
 
+/// Gives the guest the input a user gives.
+pub trait InputController {
+    /// Clicks the middle of test window `id` and returns once the guest OS has taken the input.
+    fn click_test_window(&mut self, id: u32) -> Result<(), String>;
+}
+
 /// Reads the guest's current state.
 pub trait Observer {
     /// Observes the guest, giving glazewm `ipc_limit`, measured in the guest, to answer.
@@ -85,7 +91,12 @@ pub fn run<G>(
     settle: SettleSettings,
 ) -> Result<Vec<StepOutcome>, String>
 where
-    G: Hypervisor + GuestExecutor + DisplayController + WorkloadController + Observer,
+    G: Hypervisor
+        + GuestExecutor
+        + DisplayController
+        + WorkloadController
+        + InputController
+        + Observer,
 {
     guest.restore()?;
     guest.wait_until_ready()?;
@@ -104,7 +115,7 @@ where
 fn apply(
     step: &Step,
     scenario: &Scenario,
-    guest: &mut (impl DisplayController + WorkloadController + Observer),
+    guest: &mut (impl DisplayController + WorkloadController + InputController + Observer),
     clock: &mut dyn Clock,
     settle: SettleSettings,
 ) -> Result<(), String> {
@@ -130,6 +141,7 @@ fn apply(
         Step::OpenTestWindows(batch) => guest.open_test_windows(batch),
         Step::HangTestWindow(id) => guest.hang_test_window(*id),
         Step::ResumeTestWindow(id) => guest.resume_test_window(*id),
+        Step::ClickTestWindow(id) => guest.click_test_window(*id),
         Step::StartLoad(load) => guest.start_load(load),
         Step::StopLoad(kind) => guest.stop_load(*kind),
     }
@@ -309,6 +321,13 @@ mod tests {
         }
         fn resume_test_window(&mut self, id: u32) -> Result<(), String> {
             self.log.push(format!("resume_test_window {id}"));
+            Ok(())
+        }
+    }
+
+    impl InputController for FakeGuest {
+        fn click_test_window(&mut self, id: u32) -> Result<(), String> {
+            self.log.push(format!("click_test_window {id}"));
             Ok(())
         }
     }
@@ -493,6 +512,24 @@ mod tests {
             guest.log.last().unwrap(),
             "open_test_windows TestWindowBatch { count: 3, within: Some(200ms), lifetime: DestroyedAfter(0ns) }"
         );
+    }
+
+    #[test]
+    fn clicks_a_test_window_as_a_step() {
+        let mut guest = FakeGuest::observing(vec![observed(2, 2)]);
+
+        run(
+            &scenario(vec![
+                Step::OpenTestWindows(TestWindowBatch::persistent(2)),
+                Step::ClickTestWindow(0),
+            ]),
+            &mut guest,
+            &mut FakeClock(Duration::ZERO),
+            SETTLE,
+        )
+        .unwrap();
+
+        assert_eq!(guest.log.last().unwrap(), "click_test_window 0");
     }
 
     #[test]

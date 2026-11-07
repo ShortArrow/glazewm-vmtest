@@ -82,14 +82,29 @@ pub trait DisplayPower {
     fn set_display_power(&self, on: bool) -> Result<(), String>;
 }
 
+/// The mouse and the foreground window of the interactive session.
+pub trait Pointer {
+    /// Moves the mouse to `x`, `y`, in virtual-screen coordinates and physical pixels, clicks the left button there,
+    /// and returns once the OS has taken the input.
+    fn click(&self, x: i32, y: i32) -> Result<(), String>;
+    /// The handle of the foreground window, or `None` when no window is in the foreground.
+    fn foreground_window(&self) -> Result<Option<i64>, String>;
+}
+
 /// Everything the daemon reads from or does in the guest.
 pub trait Guest:
-    TopologySource + GlazewmCli + SutProcesses + TestWindowHost + LoadHost + DisplayPower
+    TopologySource + GlazewmCli + SutProcesses + TestWindowHost + LoadHost + DisplayPower + Pointer
 {
 }
 
 impl<T> Guest for T where
-    T: TopologySource + GlazewmCli + SutProcesses + TestWindowHost + LoadHost + DisplayPower
+    T: TopologySource
+        + GlazewmCli
+        + SutProcesses
+        + TestWindowHost
+        + LoadHost
+        + DisplayPower
+        + Pointer
 {
 }
 
@@ -158,6 +173,14 @@ pub fn handle(request: Request, guest: &dyn Guest) -> Response {
         },
         Request::SetDisplayPower { on } => match guest.set_display_power(on) {
             Ok(()) => Response::DisplayPowerSet { on },
+            Err(message) => Response::Error { message },
+        },
+        Request::Click { x, y } => match guest.click(x, y) {
+            Ok(()) => Response::Clicked { x, y },
+            Err(message) => Response::Error { message },
+        },
+        Request::ForegroundWindow => match guest.foreground_window() {
+            Ok(handle) => Response::ForegroundWindow { handle },
             Err(message) => Response::Error { message },
         },
     }
@@ -242,6 +265,16 @@ mod tests {
         }
         fn stop_load(&self, _kind: LoadKindDto) -> Result<(), String> {
             Err("no load generator in this fake".into())
+        }
+    }
+
+    impl Pointer for FixedWindows {
+        fn click(&self, _x: i32, _y: i32) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn foreground_window(&self) -> Result<Option<i64>, String> {
+            Ok(Some(10))
         }
     }
 
@@ -386,6 +419,35 @@ mod tests {
     }
 
     #[test]
+    fn answers_that_it_clicked_and_which_window_is_in_the_foreground() {
+        let guest = FixedWindows {
+            opened: Ok(vec![]),
+            windows: vec![],
+        };
+
+        assert_eq!(
+            handle(Request::Click { x: -640, y: 360 }, &guest),
+            Response::Clicked { x: -640, y: 360 }
+        );
+        assert_eq!(
+            handle(Request::ForegroundWindow, &guest),
+            Response::ForegroundWindow { handle: Some(10) }
+        );
+    }
+
+    #[test]
+    fn answers_why_it_cannot_click() {
+        let guest = FixedProcesses(Ok(false));
+
+        assert_eq!(
+            handle(Request::Click { x: 0, y: 0 }, &guest),
+            Response::Error {
+                message: "no mouse in this fake".into()
+            }
+        );
+    }
+
+    #[test]
     fn answers_with_every_test_window_and_its_frame() {
         let window = TestWindowDto {
             id: 0,
@@ -419,6 +481,16 @@ mod tests {
     impl GlazewmCli for FixedProcesses {
         fn run(&self, _args: &[String], _limit: Duration) -> Result<CliOutcome, String> {
             Err("no glazewm-cli in this fake".into())
+        }
+    }
+
+    impl Pointer for FixedProcesses {
+        fn click(&self, _x: i32, _y: i32) -> Result<(), String> {
+            Err("no mouse in this fake".into())
+        }
+
+        fn foreground_window(&self) -> Result<Option<i64>, String> {
+            Err("no mouse in this fake".into())
         }
     }
 
@@ -541,6 +613,16 @@ mod tests {
         }
     }
 
+    impl Pointer for FixedTopology {
+        fn click(&self, _x: i32, _y: i32) -> Result<(), String> {
+            Err("no mouse in this fake".into())
+        }
+
+        fn foreground_window(&self) -> Result<Option<i64>, String> {
+            Err("no mouse in this fake".into())
+        }
+    }
+
     impl DisplayPower for FixedTopology {
         fn set_display_power(&self, _on: bool) -> Result<(), String> {
             Err("no displays in this fake".into())
@@ -610,6 +692,16 @@ mod tests {
         }
         fn start(&self, _program: SutProgram) -> Result<(), String> {
             Err("no processes in this fake".into())
+        }
+    }
+
+    impl Pointer for FakeCli {
+        fn click(&self, _x: i32, _y: i32) -> Result<(), String> {
+            Err("no mouse in this fake".into())
+        }
+
+        fn foreground_window(&self) -> Result<Option<i64>, String> {
+            Err("no mouse in this fake".into())
         }
     }
 

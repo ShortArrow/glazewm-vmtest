@@ -63,6 +63,14 @@ pub enum Request {
     SetDisplayPower {
         on: bool,
     },
+    /// Moves the mouse to `x`, `y`, in virtual-screen coordinates and physical pixels, and clicks the left button
+    /// there, as the user does.
+    Click {
+        x: i32,
+        y: i32,
+    },
+    /// Asks which window is the foreground window.
+    ForegroundWindow,
 }
 
 /// The SUT programs the harness deploys into the guest.
@@ -136,6 +144,14 @@ pub enum Response {
     },
     DisplayPowerSet {
         on: bool,
+    },
+    Clicked {
+        x: i32,
+        y: i32,
+    },
+    /// The handle of the foreground window, or `None` when no window is in the foreground.
+    ForegroundWindow {
+        handle: Option<i64>,
     },
     Error {
         message: String,
@@ -304,6 +320,23 @@ mod tests {
             "{\"type\":\"query_glazewm\",\"query\":\"monitors\",\"limit_ms\":2000}
 "
         );
+    }
+
+    #[test]
+    fn a_click_names_its_point_in_virtual_screen_coordinates() {
+        assert_eq!(
+            encode_line(&Request::Click { x: -640, y: 360 }),
+            "{\"type\":\"click\",\"x\":-640,\"y\":360}\n"
+        );
+    }
+
+    #[test]
+    fn the_foreground_window_survives_a_round_trip() {
+        let response = Response::ForegroundWindow { handle: Some(10) };
+
+        let decoded: Response = decode_line(&encode_line(&response)).unwrap();
+
+        assert_eq!(decoded, response);
     }
 
     #[test]

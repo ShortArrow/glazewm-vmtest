@@ -31,6 +31,8 @@ pub enum Step {
     HangTestWindow(u32),
     /// Lets the test window with this id process messages again.
     ResumeTestWindow(u32),
+    /// Clicks the middle of the test window with this id, as the user does, whether or not it processes messages.
+    ClickTestWindow(u32),
     /// Starts a load in the guest, replacing a running load of the same kind.
     StartLoad(Load),
     /// Stops the running load of this kind, if any.

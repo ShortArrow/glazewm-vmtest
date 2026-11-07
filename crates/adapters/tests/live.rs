@@ -461,3 +461,28 @@ fn zebar_keeps_running_across_monitor_count_changes() {
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed; 5]);
 }
+
+/// Test windows open one after another, each in the foreground once it exists, so the last one opened is in the
+/// foreground until the click.
+#[test]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
+fn a_click_brings_the_clicked_test_window_to_the_foreground() {
+    let scenario = Scenario {
+        name: "click a test window behind another".into(),
+        virtual_monitors: 1,
+        steps: vec![
+            Step::OpenTestWindows(TestWindowBatch::persistent(2)),
+            Step::ClickTestWindow(0),
+        ],
+        ipc_limit: DEFAULT_IPC_LIMIT,
+    };
+    let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
+
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    assert_eq!(
+        (verdicts, guest.foreground_test_window()),
+        (vec![StepVerdict::Passed; 3], Ok(Some(0)))
+    );
+}

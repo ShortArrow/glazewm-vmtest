@@ -23,7 +23,7 @@ fn main() -> std::io::Result<()> {
     use vmtest_guest_daemon::test_windows::LaunchedApp;
     use vmtest_guest_daemon::win32::{self, Win32Topology};
     use vmtest_guest_daemon::{
-        CliOutcome, DisplayPower, GlazewmCli, LoadHost, SutProcesses, TestWindowHost,
+        CliOutcome, DisplayPower, GlazewmCli, LoadHost, Pointer, SutProcesses, TestWindowHost,
         TopologySource, listen_address, serve,
     };
     use vmtest_protocol::{DisplayDto, LoadKindDto, PresenceDto, SutProgram, TestWindowDto};
@@ -97,6 +97,16 @@ fn main() -> std::io::Result<()> {
 
         fn start(&self, program: SutProgram) -> Result<(), String> {
             self.sut(program).start()
+        }
+    }
+
+    impl Pointer for LiveGuest {
+        fn click(&self, x: i32, y: i32) -> Result<(), String> {
+            win32::click(x, y)
+        }
+
+        fn foreground_window(&self) -> Result<Option<i64>, String> {
+            Ok(win32::foreground_window())
         }
     }
 

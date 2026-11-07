@@ -17,7 +17,8 @@ use vmtest_protocol::{
     TestWindowDto,
 };
 use vmtest_runner::{
-    Clock, DisplayController, GuestExecutor, Hypervisor, Observer, WorkloadController,
+    Clock, DisplayController, GuestExecutor, Hypervisor, InputController, Observer,
+    WorkloadController,
 };
 
 use crate::glazewm::{self, WindowIdentity};
@@ -302,6 +303,23 @@ impl<H> WindowsGuest<H> {
         }
     }
 
+    /// The id of the test window in the foreground, or `None` when the foreground window is no test window.
+    pub fn foreground_test_window(&mut self) -> Result<Option<u32>, String> {
+        let handle = match self.request(&Request::ForegroundWindow)? {
+            Response::ForegroundWindow { handle } => handle,
+            other => {
+                return Err(format!(
+                    "unexpected answer to asking for the foreground window: {other:?}"
+                ));
+            }
+        };
+        Ok(self
+            .test_windows()?
+            .into_iter()
+            .find(|window| Some(window.handle) == handle)
+            .map(|window| window.id))
+    }
+
     fn start(&mut self, program: SutProgram) -> Result<(), String> {
         match self.request(&Request::StartSut { program })? {
             Response::SutStarted { program: started } if started == program => Ok(()),
@@ -498,6 +516,31 @@ impl<H> DisplayController for WindowsGuest<H> {
 
     fn wake_displays(&mut self) -> Result<(), String> {
         self.set_display_power(true)
+    }
+}
+
+/// The middle of test window `id`'s frame, in virtual-screen coordinates and physical pixels.
+fn middle_of_test_window(windows: &[TestWindowDto], id: u32) -> Result<(i32, i32), String> {
+    let window = windows
+        .iter()
+        .find(|window| window.id == id)
+        .ok_or_else(|| format!("test window {id} was never opened"))?;
+    let frame = window
+        .frame
+        .ok_or_else(|| format!("test window {id} no longer exists"))?;
+    let half = |length: u32| i32::try_from(length / 2).unwrap_or(i32::MAX);
+    Ok((frame.x + half(frame.width), frame.y + half(frame.height)))
+}
+
+impl<H> InputController for WindowsGuest<H> {
+    fn click_test_window(&mut self, id: u32) -> Result<(), String> {
+        let (x, y) = middle_of_test_window(&self.test_windows()?, id)?;
+        match self.request(&Request::Click { x, y })? {
+            Response::Clicked { x: cx, y: cy } if (cx, cy) == (x, y) => Ok(()),
+            other => Err(format!(
+                "unexpected answer to clicking test window {id} at {x}, {y}: {other:?}"
+            )),
+        }
     }
 }
 
@@ -725,6 +768,36 @@ fn poll<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_window(id: u32, frame: Option<RectDto>) -> TestWindowDto {
+        TestWindowDto {
+            id,
+            handle: 10 + i64::from(id),
+            frame,
+            hung: false,
+        }
+    }
+
+    #[test]
+    fn clicks_a_test_window_in_the_middle_of_its_frame() {
+        let frame = RectDto {
+            x: -1280,
+            y: 0,
+            width: 640,
+            height: 401,
+        };
+        let windows = [test_window(0, None), test_window(1, Some(frame))];
+
+        assert_eq!(middle_of_test_window(&windows, 1), Ok((-960, 200)));
+    }
+
+    #[test]
+    fn cannot_click_a_test_window_that_is_closed_or_was_never_opened() {
+        let windows = [test_window(0, None)];
+
+        assert!(middle_of_test_window(&windows, 0).is_err());
+        assert!(middle_of_test_window(&windows, 1).is_err());
+    }
 
     fn guest(daemon_forward: Option<&str>) -> WindowsGuest<()> {
         WindowsGuest::with_hypervisor(
