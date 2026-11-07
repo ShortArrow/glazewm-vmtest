@@ -7,14 +7,14 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use vmtest_domain::scenario::{
-    GlazewmIpc, Load, LoadKind, Observation, TestWindow, TestWindowBatch, WindowLifetime,
-    WindowPresence,
+    GlazewmIpc, Load, LoadKind, Observation, Projection, TestWindow, TestWindowBatch,
+    WindowLifetime, WindowPresence,
 };
 use vmtest_domain::topology::Rect;
 use vmtest_guest_client::GuestDaemonClient;
 use vmtest_protocol::{
-    DisplayDto, GlazewmQuery, LoadKindDto, PresenceDto, RectDto, Request, Response, SutProgram,
-    TestWindowDto,
+    DisplayDto, GlazewmQuery, LoadKindDto, PresenceDto, ProjectionDto, RectDto, Request, Response,
+    SutProgram, TestWindowDto,
 };
 use vmtest_runner::{
     Clock, DisplayController, GuestExecutor, Hypervisor, InputController, Observer,
@@ -516,6 +516,21 @@ impl<H> DisplayController for WindowsGuest<H> {
 
     fn wake_displays(&mut self) -> Result<(), String> {
         self.set_display_power(true)
+    }
+
+    fn set_projection(&mut self, projection: Projection) -> Result<(), String> {
+        let dto = match projection {
+            Projection::PcScreenOnly => ProjectionDto::PcScreenOnly,
+            Projection::Duplicate => ProjectionDto::Duplicate,
+            Projection::Extend => ProjectionDto::Extend,
+            Projection::SecondScreenOnly => ProjectionDto::SecondScreenOnly,
+        };
+        match self.request(&Request::SetProjection { projection: dto })? {
+            Response::ProjectionSet { projection: set } if set == dto => Ok(()),
+            other => Err(format!(
+                "unexpected answer to switching to {projection:?}: {other:?}"
+            )),
+        }
     }
 }
 

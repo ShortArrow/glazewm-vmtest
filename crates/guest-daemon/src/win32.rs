@@ -2,7 +2,11 @@
 
 use std::path::Path;
 
-use vmtest_protocol::{DisplayDto, PresenceDto, RectDto};
+use vmtest_protocol::{DisplayDto, PresenceDto, ProjectionDto, RectDto};
+use windows::Win32::Devices::Display::{
+    SDC_APPLY, SDC_TOPOLOGY_CLONE, SDC_TOPOLOGY_EXTEND, SDC_TOPOLOGY_EXTERNAL,
+    SDC_TOPOLOGY_INTERNAL, SetDisplayConfig,
+};
 use windows::Win32::Foundation::WPARAM;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
@@ -93,6 +97,22 @@ fn send(inputs: &[INPUT]) -> Result<(), String> {
             inputs.len(),
             windows::core::Error::from_thread()
         ))
+    }
+}
+
+/// Switches which displays the OS uses to `projection`, as Win+P does.
+pub fn set_projection(projection: ProjectionDto) -> Result<(), String> {
+    let topology = match projection {
+        ProjectionDto::PcScreenOnly => SDC_TOPOLOGY_INTERNAL,
+        ProjectionDto::Duplicate => SDC_TOPOLOGY_CLONE,
+        ProjectionDto::Extend => SDC_TOPOLOGY_EXTEND,
+        ProjectionDto::SecondScreenOnly => SDC_TOPOLOGY_EXTERNAL,
+    };
+    match unsafe { SetDisplayConfig(None, None, SDC_APPLY | topology) } {
+        0 => Ok(()),
+        error => Err(format!(
+            "SetDisplayConfig refused {projection:?} with error {error}"
+        )),
     }
 }
 

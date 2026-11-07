@@ -12,8 +12,8 @@ use std::io::{BufRead, Write};
 use std::time::Duration;
 
 use vmtest_protocol::{
-    DisplayDto, LoadKindDto, PresenceDto, Request, Response, SutProgram, TestWindowDto,
-    decode_line, encode_line,
+    DisplayDto, LoadKindDto, PresenceDto, ProjectionDto, Request, Response, SutProgram,
+    TestWindowDto, decode_line, encode_line,
 };
 
 use crate::test_windows::Batch;
@@ -82,6 +82,12 @@ pub trait DisplayPower {
     fn set_display_power(&self, on: bool) -> Result<(), String>;
 }
 
+/// Which displays the OS of the interactive session uses.
+pub trait DisplayProjection {
+    /// Switches to `projection`, as Win+P does, and returns once the OS has applied it.
+    fn set_projection(&self, projection: ProjectionDto) -> Result<(), String>;
+}
+
 /// The mouse and the foreground window of the interactive session.
 pub trait Pointer {
     /// Moves the mouse to `x`, `y`, in virtual-screen coordinates and physical pixels, clicks the left button there,
@@ -93,7 +99,14 @@ pub trait Pointer {
 
 /// Everything the daemon reads from or does in the guest.
 pub trait Guest:
-    TopologySource + GlazewmCli + SutProcesses + TestWindowHost + LoadHost + DisplayPower + Pointer
+    TopologySource
+    + GlazewmCli
+    + SutProcesses
+    + TestWindowHost
+    + LoadHost
+    + DisplayPower
+    + DisplayProjection
+    + Pointer
 {
 }
 
@@ -104,6 +117,7 @@ impl<T> Guest for T where
         + TestWindowHost
         + LoadHost
         + DisplayPower
+        + DisplayProjection
         + Pointer
 {
 }
@@ -177,6 +191,10 @@ pub fn handle(request: Request, guest: &dyn Guest) -> Response {
         },
         Request::Click { x, y } => match guest.click(x, y) {
             Ok(()) => Response::Clicked { x, y },
+            Err(message) => Response::Error { message },
+        },
+        Request::SetProjection { projection } => match guest.set_projection(projection) {
+            Ok(()) => Response::ProjectionSet { projection },
             Err(message) => Response::Error { message },
         },
         Request::ForegroundWindow => match guest.foreground_window() {
@@ -265,6 +283,12 @@ mod tests {
         }
         fn stop_load(&self, _kind: LoadKindDto) -> Result<(), String> {
             Err("no load generator in this fake".into())
+        }
+    }
+
+    impl DisplayProjection for FixedWindows {
+        fn set_projection(&self, _projection: ProjectionDto) -> Result<(), String> {
+            Ok(())
         }
     }
 
@@ -436,6 +460,30 @@ mod tests {
     }
 
     #[test]
+    fn answers_that_the_projection_was_switched_or_why_not() {
+        let switched = FixedWindows {
+            opened: Ok(vec![]),
+            windows: vec![],
+        };
+        let refused = FixedProcesses(Ok(false));
+        let request = || Request::SetProjection {
+            projection: ProjectionDto::Extend,
+        };
+
+        assert_eq!(
+            (handle(request(), &switched), handle(request(), &refused)),
+            (
+                Response::ProjectionSet {
+                    projection: ProjectionDto::Extend
+                },
+                Response::Error {
+                    message: "no displays to switch in this fake".into()
+                }
+            )
+        );
+    }
+
+    #[test]
     fn answers_why_it_cannot_click() {
         let guest = FixedProcesses(Ok(false));
 
@@ -481,6 +529,12 @@ mod tests {
     impl GlazewmCli for FixedProcesses {
         fn run(&self, _args: &[String], _limit: Duration) -> Result<CliOutcome, String> {
             Err("no glazewm-cli in this fake".into())
+        }
+    }
+
+    impl DisplayProjection for FixedProcesses {
+        fn set_projection(&self, _projection: ProjectionDto) -> Result<(), String> {
+            Err("no displays to switch in this fake".into())
         }
     }
 
@@ -613,6 +667,12 @@ mod tests {
         }
     }
 
+    impl DisplayProjection for FixedTopology {
+        fn set_projection(&self, _projection: ProjectionDto) -> Result<(), String> {
+            Err("no displays to switch in this fake".into())
+        }
+    }
+
     impl Pointer for FixedTopology {
         fn click(&self, _x: i32, _y: i32) -> Result<(), String> {
             Err("no mouse in this fake".into())
@@ -692,6 +752,12 @@ mod tests {
         }
         fn start(&self, _program: SutProgram) -> Result<(), String> {
             Err("no processes in this fake".into())
+        }
+    }
+
+    impl DisplayProjection for FakeCli {
+        fn set_projection(&self, _projection: ProjectionDto) -> Result<(), String> {
+            Err("no displays to switch in this fake".into())
         }
     }
 

@@ -8,8 +8,8 @@ use vmtest_domain::invariant::{
     tiled_windows_within_working_area, zebar_is_running,
 };
 use vmtest_domain::scenario::{
-    ActiveLoads, GlazewmIpc, Load, LoadKind, Observation, Scenario, Step, StepOutcome, StepVerdict,
-    TestWindowBatch,
+    ActiveLoads, GlazewmIpc, Load, LoadKind, Observation, Projection, Scenario, Step, StepOutcome,
+    StepVerdict, TestWindowBatch,
 };
 use vmtest_domain::settle::{SettleState, SettleTracker};
 
@@ -39,6 +39,8 @@ pub trait DisplayController {
     fn turn_displays_off(&mut self) -> Result<(), String>;
     /// Wakes the displays with input and returns once the guest OS has been given it.
     fn wake_displays(&mut self) -> Result<(), String>;
+    /// Switches to `projection`, as Win+P does, and returns once the guest OS has applied it.
+    fn set_projection(&mut self, projection: Projection) -> Result<(), String>;
 }
 
 /// Starts and stops what the guest runs besides the SUT.
@@ -138,6 +140,7 @@ fn apply(
         Step::RestoreVirtualMonitors => guest.restore_virtual_monitors(),
         Step::TurnDisplaysOff => guest.turn_displays_off(),
         Step::WakeDisplays => guest.wake_displays(),
+        Step::SwitchProjection(projection) => guest.set_projection(*projection),
         Step::OpenTestWindows(batch) => guest.open_test_windows(batch),
         Step::HangTestWindow(id) => guest.hang_test_window(*id),
         Step::ResumeTestWindow(id) => guest.resume_test_window(*id),
@@ -297,6 +300,10 @@ mod tests {
         }
         fn wake_displays(&mut self) -> Result<(), String> {
             self.log.push("wake_displays".into());
+            Ok(())
+        }
+        fn set_projection(&mut self, projection: Projection) -> Result<(), String> {
+            self.log.push(format!("set_projection {projection:?}"));
             Ok(())
         }
     }
@@ -511,6 +518,27 @@ mod tests {
         assert_eq!(
             guest.log.last().unwrap(),
             "open_test_windows TestWindowBatch { count: 3, within: Some(200ms), lifetime: DestroyedAfter(0ns) }"
+        );
+    }
+
+    #[test]
+    fn switches_the_projection_as_a_step() {
+        let mut guest = FakeGuest::observing(vec![observed(2, 2)]);
+
+        run(
+            &scenario(vec![
+                Step::SwitchProjection(Projection::PcScreenOnly),
+                Step::SwitchProjection(Projection::Extend),
+            ]),
+            &mut guest,
+            &mut FakeClock(Duration::ZERO),
+            SETTLE,
+        )
+        .unwrap();
+
+        assert_eq!(
+            guest.log[guest.log.len() - 2..],
+            ["set_projection PcScreenOnly", "set_projection Extend"]
         );
     }
 

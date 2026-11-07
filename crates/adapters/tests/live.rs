@@ -27,8 +27,8 @@ use vmtest_adapters::windows_guest::{
 };
 use vmtest_domain::baseline::{Baseline, Deviation};
 use vmtest_domain::scenario::{
-    DEFAULT_IPC_LIMIT, Load, LoadKind, Observation, Scenario, Step, StepVerdict, TestWindowBatch,
-    WindowLifetime,
+    DEFAULT_IPC_LIMIT, Load, LoadKind, Observation, Projection, Scenario, Step, StepVerdict,
+    TestWindowBatch, WindowLifetime,
 };
 use vmtest_runner::{Hypervisor, SettleSettings, run};
 
@@ -60,32 +60,75 @@ fn quiet_glazewm_config() -> String {
     config_without_startup_commands(&sample)
 }
 
-/// The quiet sample configuration with ten workspaces that are all kept alive, seven of them bound to the
-/// second monitor, so that no workspace configuration is left for a monitor added later.
-fn every_workspace_kept_alive_config() -> String {
+/// The quiet sample configuration with `workspaces` in place of its workspaces section.
+fn quiet_config_with_workspaces(workspaces: &str) -> String {
     let quiet = quiet_glazewm_config();
     let start = quiet
-        .find("\nworkspaces:")
+        .find(
+            "
+workspaces:",
+        )
         .expect("the sample has a workspaces section")
         + 1;
     let end = quiet
-        .find("\nwindow_rules:")
+        .find(
+            "
+window_rules:",
+        )
         .expect("window rules follow the workspaces")
         + 1;
-    let bound =
-        |name: &str| format!("  - name: '{name}'\n    bind_to_monitor: 1\n    keep_alive: true\n");
-    let kept = |name: &str| format!("  - name: '{name}'\n    keep_alive: true\n");
-    let workspaces: String = ["0", "1", "2", "3", "4", "5"]
-        .into_iter()
-        .map(bound)
-        .chain(["6", "7", "8"].into_iter().map(kept))
-        .chain([bound("9")])
-        .collect();
     format!(
-        "{}workspaces:\n{workspaces}\n{}",
+        "{}workspaces:
+{workspaces}
+{}",
         &quiet[..start],
         &quiet[end..]
     )
+}
+
+fn bound_and_kept_alive(name: &str) -> String {
+    format!(
+        "  - name: '{name}'
+    bind_to_monitor: 1
+    keep_alive: true
+"
+    )
+}
+
+/// The quiet sample configuration with ten workspaces that are all kept alive, seven of them bound to the
+/// second monitor, so that no workspace configuration is left for a monitor added later.
+fn every_workspace_kept_alive_config() -> String {
+    let kept = |name: &str| {
+        format!(
+            "  - name: '{name}'
+    keep_alive: true
+"
+        )
+    };
+    let workspaces: String = ["0", "1", "2", "3", "4", "5"]
+        .into_iter()
+        .map(bound_and_kept_alive)
+        .chain(["6", "7", "8"].into_iter().map(kept))
+        .chain([bound_and_kept_alive("9")])
+        .collect();
+    quiet_config_with_workspaces(&workspaces)
+}
+
+/// The quiet sample configuration with ten workspaces, eight of them bound to the second monitor and kept alive
+/// and two of them neither, as users of the harness set them.
+fn mostly_kept_alive_config() -> String {
+    let workspaces: String = ["0", "1", "2", "3", "4", "5", "6"]
+        .into_iter()
+        .map(bound_and_kept_alive)
+        .chain(["7", "8"].into_iter().map(|name| {
+            format!(
+                "  - name: '{name}'
+"
+            )
+        }))
+        .chain([bound_and_kept_alive("9")])
+        .collect();
+    quiet_config_with_workspaces(&workspaces)
 }
 
 /// The guest, with glazewm starting with `glazewm_config`, written under `name` in target/vmtest.
@@ -484,5 +527,41 @@ fn a_click_brings_the_clicked_test_window_to_the_foreground() {
     assert_eq!(
         (verdicts, guest.foreground_test_window()),
         (vec![StepVerdict::Passed; 3], Ok(Some(0)))
+    );
+}
+
+/// Win+P keeps the monitors connected and switches which of them the OS uses.
+#[test]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
+fn every_monitor_displays_a_workspace_after_switching_projections() {
+    let scenario = Scenario {
+        name: "Win+P between PC screen only and extend".into(),
+        virtual_monitors: 2,
+        steps: vec![
+            Step::SwitchProjection(Projection::PcScreenOnly),
+            Step::SwitchProjection(Projection::Extend),
+            Step::SwitchProjection(Projection::PcScreenOnly),
+            Step::SwitchProjection(Projection::Extend),
+        ],
+        ipc_limit: DEFAULT_IPC_LIMIT,
+    };
+    let mut guest = guest(
+        "glazewm-config-mostly-kept-alive.yaml",
+        &mostly_kept_alive_config(),
+    );
+
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+
+    let displays: Vec<_> = outcomes
+        .iter()
+        .map(|o| o.observation.as_ref().map(|o| o.os_displays().len()))
+        .collect();
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    assert_eq!(
+        (displays, verdicts),
+        (
+            [3, 1, 3, 1, 3].map(Some).to_vec(),
+            vec![StepVerdict::Passed; 5]
+        )
     );
 }

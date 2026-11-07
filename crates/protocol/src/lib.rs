@@ -69,8 +69,22 @@ pub enum Request {
         x: i32,
         y: i32,
     },
+    /// Switches which displays the OS uses, as Win+P does; the monitors stay connected.
+    SetProjection {
+        projection: ProjectionDto,
+    },
     /// Asks which window is the foreground window.
     ForegroundWindow,
+}
+
+/// The display modes Win+P offers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectionDto {
+    PcScreenOnly,
+    Duplicate,
+    Extend,
+    SecondScreenOnly,
 }
 
 /// The SUT programs the harness deploys into the guest.
@@ -148,6 +162,9 @@ pub enum Response {
     Clicked {
         x: i32,
         y: i32,
+    },
+    ProjectionSet {
+        projection: ProjectionDto,
     },
     /// The handle of the foreground window, or `None` when no window is in the foreground.
     ForegroundWindow {
@@ -327,6 +344,16 @@ mod tests {
         assert_eq!(
             encode_line(&Request::Click { x: -640, y: 360 }),
             "{\"type\":\"click\",\"x\":-640,\"y\":360}\n"
+        );
+    }
+
+    #[test]
+    fn a_projection_is_named_as_win_p_names_it() {
+        assert_eq!(
+            encode_line(&Request::SetProjection {
+                projection: ProjectionDto::PcScreenOnly
+            }),
+            "{\"type\":\"set_projection\",\"projection\":\"pc_screen_only\"}\n"
         );
     }
 

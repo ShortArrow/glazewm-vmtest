@@ -26,6 +26,8 @@ pub enum Step {
     TurnDisplaysOff,
     /// Wakes the displays with input, as the user does on returning.
     WakeDisplays,
+    /// Switches which displays the OS uses, as Win+P does; the monitors stay connected.
+    SwitchProjection(Projection),
     OpenTestWindows(TestWindowBatch),
     /// Stops the message processing of the test window with this id.
     HangTestWindow(u32),
@@ -37,6 +39,19 @@ pub enum Step {
     StartLoad(Load),
     /// Stops the running load of this kind, if any.
     StopLoad(LoadKind),
+}
+
+/// The display modes Win+P offers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Projection {
+    /// Only the primary display.
+    PcScreenOnly,
+    /// Every display shows the same picture.
+    Duplicate,
+    /// Every display, side by side.
+    Extend,
+    /// Every display but the primary one.
+    SecondScreenOnly,
 }
 
 /// What a load uses up in the guest.

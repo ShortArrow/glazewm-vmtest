@@ -23,10 +23,12 @@ fn main() -> std::io::Result<()> {
     use vmtest_guest_daemon::test_windows::LaunchedApp;
     use vmtest_guest_daemon::win32::{self, Win32Topology};
     use vmtest_guest_daemon::{
-        CliOutcome, DisplayPower, GlazewmCli, LoadHost, Pointer, SutProcesses, TestWindowHost,
-        TopologySource, listen_address, serve,
+        CliOutcome, DisplayPower, DisplayProjection, GlazewmCli, LoadHost, Pointer, SutProcesses,
+        TestWindowHost, TopologySource, listen_address, serve,
     };
-    use vmtest_protocol::{DisplayDto, LoadKindDto, PresenceDto, SutProgram, TestWindowDto};
+    use vmtest_protocol::{
+        DisplayDto, LoadKindDto, PresenceDto, ProjectionDto, SutProgram, TestWindowDto,
+    };
 
     struct LiveGuest {
         cli: ProcessGlazewmCli,
@@ -97,6 +99,12 @@ fn main() -> std::io::Result<()> {
 
         fn start(&self, program: SutProgram) -> Result<(), String> {
             self.sut(program).start()
+        }
+    }
+
+    impl DisplayProjection for LiveGuest {
+        fn set_projection(&self, projection: ProjectionDto) -> Result<(), String> {
+            win32::set_projection(projection)
         }
     }
 

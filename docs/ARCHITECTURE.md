@@ -52,7 +52,7 @@ Port responsibilities:
 | Port | Responsibility |
 |---|---|
 | `Hypervisor` | Start, stop, create and restore snapshots |
-| `DisplayController` | Change the guest topology per monitor |
+| `DisplayController` | Change the guest topology per monitor, and switch which displays the guest OS uses, as Win+P does |
 | `SessionController` | Connect and disconnect RDP / VNC clients; lock and unlock; sleep and resume |
 | `WorkloadController` | Start and stop CPU / memory / GPU load; create, hang, resume, and close test windows |
 | `InputController` | Give the guest the input a user gives: click a test window, whether or not it processes messages |
