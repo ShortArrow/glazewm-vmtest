@@ -227,6 +227,7 @@ fn glazewm_tracks_virtual_monitor_count_changes() {
             Step::RestoreVirtualMonitors,
         ],
         ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
     };
     let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
@@ -256,6 +257,7 @@ fn tiled_test_windows_stay_within_their_working_area_across_monitor_count_change
             Step::RestoreVirtualMonitors,
         ],
         ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
     };
     let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
@@ -278,6 +280,7 @@ fn every_monitor_gets_a_workspace_back_when_every_workspace_is_kept_alive() {
         virtual_monitors: 3,
         steps: vec![Step::RemoveVirtualMonitors, Step::RestoreVirtualMonitors],
         ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
     };
     let mut guest = guest(
         "glazewm-every-workspace-kept-alive.yaml",
@@ -311,6 +314,7 @@ fn a_hung_test_window_does_not_stop_glazewm_managing_the_others() {
             Step::ResumeTestWindow(1),
         ],
         ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
     };
     let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
@@ -356,6 +360,7 @@ fn glazewm_keeps_no_short_lived_window_after_a_burst() {
             Step::RestoreVirtualMonitors,
         ],
         ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
     };
     let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
@@ -393,6 +398,7 @@ fn glazewm_tracks_losing_every_display_under_cpu_and_memory_load() {
             Step::StopLoad(LoadKind::Memory),
         ],
         ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
     };
     let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
@@ -432,6 +438,9 @@ fn glazewm_answers_ipc_after_a_startup_command_fails() {
         virtual_monitors: 1,
         steps: vec![],
         ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![
+            "Non-fatal error: Shell exec failed for 'vmtest-missing-program'".into(),
+        ],
     };
     let glazewm_config = quiet_glazewm_config().replacen(
         "startup_commands: []",
@@ -457,6 +466,7 @@ fn reports_a_glazewm_that_exits_as_not_running() {
         virtual_monitors: 1,
         steps: vec![Step::SetVirtualMonitorCount(2)],
         ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
     };
     let kill_glazewm_at_three_monitors = encoded_command(
         "Add-Type -Name M -Namespace W -MemberDefinition '[DllImport(\"user32.dll\")] public static extern int GetSystemMetrics(int i);';          while ([W.M]::GetSystemMetrics(80) -lt 3) { Start-Sleep -Milliseconds 200 };          Stop-Process -Name glazewm -Force",
@@ -496,6 +506,7 @@ fn zebar_keeps_running_across_monitor_count_changes() {
             Step::RestoreVirtualMonitors,
         ],
         ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
     };
     let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config()).with_zebar(zebar());
 
@@ -518,6 +529,7 @@ fn a_click_brings_the_clicked_test_window_to_the_foreground() {
             Step::ClickTestWindow(0),
         ],
         ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
     };
     let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
@@ -544,6 +556,7 @@ fn every_monitor_displays_a_workspace_after_switching_projections() {
             Step::SwitchProjection(Projection::Extend),
         ],
         ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
     };
     let mut guest = guest(
         "glazewm-config-mostly-kept-alive.yaml",

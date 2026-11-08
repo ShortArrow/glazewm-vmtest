@@ -55,7 +55,7 @@ Port responsibilities:
 | `DisplayController` | Change the guest topology per monitor, and switch which displays the guest OS uses, as Win+P does |
 | `SessionController` | Connect and disconnect RDP / VNC clients; lock and unlock; sleep and resume |
 | `WorkloadController` | Start and stop CPU / memory / GPU load; create, hang, resume, and close test windows |
-| `InputController` | Give the guest the input a user gives: click a test window, whether or not it processes messages |
+| `InputController` | Give the guest the input a user gives: click a test window, whether or not it processes messages, and press a keyboard shortcut written as glazewm's configuration writes its bindings. A binding glazewm runs from the keyboard shows its errors in a dialog, while the same command sent over IPC only logs them |
 | `GuestExecutor` | Transfer files to the guest and send requests to the guest daemon, which listens on TCP inside the guest and speaks JSON, one object per line. The daemon has no authentication and can make glazewm run commands, so its port is never reachable from a network: it is reached through an SSH port forward, or through a port published on the host's loopback |
 | `Observer` | Capture topology, window bounds, glazewm state, zebar window placement, process liveness, IPC responsiveness, and screenshots |
 
@@ -89,6 +89,7 @@ An invariant states what must hold whatever the SUT is meant to do; a violation 
 - Once settled, glazewm manages no window that no longer exists, and every window it manages is a top-level window. This covers every window glazewm reports, not only test windows: the guest daemon asks the OS about each handle, and a window with the `WS_CHILD` style counts as a child.
 - Once settled, the actual bounds of every tiled window, read from the OS, lie within the working area of its monitor. The bounds are the visible frame, without the invisible resize borders. Only test windows are compared, since the harness reads the bounds of no other window, and only those on displayed workspaces, since glazewm's hide method decides where the others are.
 - Once settled, for each monitor that the zebar configuration targets, exactly one bar window sits on that monitor.
+- After every step glazewm has no dialog open. glazewm opens a dialog for an error it does not stop on, such as a failed command, and on some commits stops answering until the user closes it. The guest daemon reads the title and the text of every visible dialog the deployed glazewm owns. A scenario that makes glazewm fail on purpose, such as with a startup command naming a missing program, lists the beginnings of the dialog texts it allows.
 
 A baseline pins what the SUT currently does where nobody has specified what it should do; a deviation is a change in behaviour, to be judged by a person.
 Baselines compare a canonical form of the observation: monitors identified by position and bounds, workspaces by name, test windows by the identifier the guest daemon gives them. Values that differ between identical runs — container UUIDs, window handles, timestamps — are dropped.

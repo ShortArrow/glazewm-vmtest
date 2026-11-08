@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use vmtest_domain::invariant::{
     every_monitor_displays_one_workspace, glazewm_answers_ipc, glazewm_is_running,
-    manages_only_existing_top_level_windows, monitor_count_matches,
+    glazewm_shows_no_dialog, manages_only_existing_top_level_windows, monitor_count_matches,
     tiled_windows_within_working_area, zebar_is_running,
 };
 use vmtest_domain::scenario::{
@@ -61,6 +61,8 @@ pub trait WorkloadController {
 pub trait InputController {
     /// Clicks the middle of test window `id` and returns once the guest OS has taken the input.
     fn click_test_window(&mut self, id: u32) -> Result<(), String>;
+    /// Presses the keys of `shortcut` and returns once the guest OS has taken the input.
+    fn press_shortcut(&mut self, shortcut: &str) -> Result<(), String>;
 }
 
 /// Reads the guest's current state.
@@ -145,6 +147,7 @@ fn apply(
         Step::HangTestWindow(id) => guest.hang_test_window(*id),
         Step::ResumeTestWindow(id) => guest.resume_test_window(*id),
         Step::ClickTestWindow(id) => guest.click_test_window(*id),
+        Step::PressShortcut(shortcut) => guest.press_shortcut(shortcut),
         Step::StartLoad(load) => guest.start_load(load),
         Step::StopLoad(kind) => guest.stop_load(*kind),
     }
@@ -158,7 +161,7 @@ fn settled_outcome(
     settle: SettleSettings,
 ) -> Result<StepOutcome, String> {
     let observation = settled_observation(|| guest.observe(scenario.ipc_limit), clock, settle)?;
-    let verdict = judge(observation.as_ref(), loads);
+    let verdict = judge(observation.as_ref(), loads, &scenario.allowed_dialogs);
     Ok(StepOutcome {
         observation,
         verdict,
@@ -194,7 +197,11 @@ fn settled_observation(
 /// zebar's liveness is judged whatever glazewm did.
 ///
 /// While a load runs, a glazewm that does not answer within the IPC limit is not held to it.
-fn judge(observation: Option<&Observation>, loads: &ActiveLoads) -> StepVerdict {
+fn judge(
+    observation: Option<&Observation>,
+    loads: &ActiveLoads,
+    allowed_dialogs: &[String],
+) -> StepVerdict {
     let Some(observation) = observation else {
         return StepVerdict::Unsettled;
     };
@@ -209,6 +216,10 @@ fn judge(observation: Option<&Observation>, loads: &ActiveLoads) -> StepVerdict 
         GlazewmIpc::NoAnswer => vec![glazewm_answers_ipc(observation.glazewm())],
         GlazewmIpc::NotRunning => vec![glazewm_is_running(observation.glazewm())],
     };
+    checked.push(glazewm_shows_no_dialog(
+        observation.glazewm_dialogs(),
+        allowed_dialogs,
+    ));
     checked.push(zebar_is_running(observation.zebar_running()));
     let violations: Vec<_> = checked.into_iter().filter_map(Result::err).collect();
     if violations.is_empty() {
@@ -337,6 +348,10 @@ mod tests {
             self.log.push(format!("click_test_window {id}"));
             Ok(())
         }
+        fn press_shortcut(&mut self, shortcut: &str) -> Result<(), String> {
+            self.log.push(format!("press_shortcut {shortcut}"));
+            Ok(())
+        }
     }
 
     impl Observer for FakeGuest {
@@ -403,6 +418,7 @@ mod tests {
             virtual_monitors: 1,
             steps,
             ipc_limit: Duration::from_secs(2),
+            allowed_dialogs: vec![],
         }
     }
 
@@ -540,6 +556,21 @@ mod tests {
             guest.log[guest.log.len() - 2..],
             ["set_projection PcScreenOnly", "set_projection Extend"]
         );
+    }
+
+    #[test]
+    fn presses_a_shortcut_as_a_step() {
+        let mut guest = FakeGuest::observing(vec![observed(2, 2)]);
+
+        run(
+            &scenario(vec![Step::PressShortcut("alt+shift+f".into())]),
+            &mut guest,
+            &mut FakeClock(Duration::ZERO),
+            SETTLE,
+        )
+        .unwrap();
+
+        assert_eq!(guest.log.last().unwrap(), "press_shortcut alt+shift+f");
     }
 
     #[test]
@@ -791,6 +822,61 @@ mod tests {
         assert!(
             matches!(&verdicts[1], StepVerdict::Violated(v) if v.len() == 1 && v[0].invariant == "zebar_is_running")
         );
+    }
+
+    #[test]
+    fn reports_a_glazewm_dialog_whether_or_not_glazewm_still_answers() {
+        let dialog = || vec!["Non-fatal error: No displayed workspace.".to_string()];
+        let mut observations = vec![observed(2, 2); 6];
+        observations.extend(vec![observed(2, 2).with_glazewm_dialogs(dialog()); 6]);
+        observations.extend(vec![unanswered(2).with_glazewm_dialogs(dialog()); 6]);
+        let mut guest = FakeGuest::observing(observations);
+
+        let verdicts = verdicts(
+            run(
+                &scenario(vec![Step::TurnDisplaysOff, Step::WakeDisplays]),
+                &mut guest,
+                &mut FakeClock(Duration::ZERO),
+                SETTLE,
+            )
+            .unwrap(),
+        );
+
+        let invariants = |verdict: &StepVerdict| match verdict {
+            StepVerdict::Violated(violations) => violations.iter().map(|v| v.invariant).collect(),
+            _ => vec![],
+        };
+        assert_eq!(
+            verdicts.iter().map(invariants).collect::<Vec<_>>(),
+            [
+                vec![],
+                vec!["glazewm_shows_no_dialog"],
+                vec!["glazewm_answers_ipc", "glazewm_shows_no_dialog"]
+            ]
+        );
+    }
+
+    #[test]
+    fn does_not_report_a_glazewm_dialog_the_scenario_allows() {
+        let dialog = "Non-fatal error: Shell exec failed for 'zebar'.".to_string();
+        let mut guest =
+            FakeGuest::observing(vec![observed(2, 2).with_glazewm_dialogs(vec![dialog])]);
+        let scenario = Scenario {
+            allowed_dialogs: vec!["Non-fatal error: Shell exec failed".into()],
+            ..scenario(vec![])
+        };
+
+        let verdicts = verdicts(
+            run(
+                &scenario,
+                &mut guest,
+                &mut FakeClock(Duration::ZERO),
+                SETTLE,
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(verdicts, [StepVerdict::Passed]);
     }
 
     #[test]

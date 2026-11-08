@@ -386,6 +386,13 @@ impl<H> WindowsGuest<H> {
         }
     }
 
+    fn dialogs(&mut self, program: SutProgram) -> Result<Vec<String>, String> {
+        match self.request(&Request::SutDialogs { program })? {
+            Response::Dialogs { texts } => Ok(texts),
+            other => Err(format!("unexpected answer to sut_dialogs: {other:?}")),
+        }
+    }
+
     fn is_running(&mut self, program: SutProgram) -> Result<bool, String> {
         let request = Request::SutRunning { program };
         match self.request(&request)? {
@@ -557,6 +564,18 @@ impl<H> InputController for WindowsGuest<H> {
             )),
         }
     }
+
+    fn press_shortcut(&mut self, shortcut: &str) -> Result<(), String> {
+        let request = Request::PressShortcut {
+            shortcut: shortcut.into(),
+        };
+        match self.request(&request)? {
+            Response::ShortcutPressed { shortcut: pressed } if pressed == shortcut => Ok(()),
+            other => Err(format!(
+                "unexpected answer to pressing {shortcut}: {other:?}"
+            )),
+        }
+    }
 }
 
 impl<H> WorkloadController for WindowsGuest<H> {
@@ -641,7 +660,8 @@ impl<H> Observer for WindowsGuest<H> {
                 hung: window.hung,
             })
             .collect();
-        let observation = Observation::new(os_displays, test_windows, glazewm);
+        let observation = Observation::new(os_displays, test_windows, glazewm)
+            .with_glazewm_dialogs(self.dialogs(SutProgram::Glazewm)?);
         if self.config.zebar.is_none() {
             return Ok(observation);
         }

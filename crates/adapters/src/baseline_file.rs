@@ -56,6 +56,8 @@ struct ObservationFile {
     glazewm: GlazewmFile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     zebar_running: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    glazewm_dialogs: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -164,6 +166,7 @@ impl From<&Observation> for ObservationFile {
                 GlazewmIpc::NotRunning => GlazewmFile::NotRunning,
             },
             zebar_running: observation.zebar_running(),
+            glazewm_dialogs: observation.glazewm_dialogs().to_vec(),
         }
     }
 }
@@ -188,7 +191,8 @@ impl From<ObservationFile> for Observation {
                 })
                 .collect(),
             glazewm,
-        );
+        )
+        .with_glazewm_dialogs(file.glazewm_dialogs);
         match file.zebar_running {
             Some(running) => observation.with_zebar_running(running),
             None => observation,
@@ -356,6 +360,12 @@ mod tests {
                 Some(
                     Observation::new(vec![RECT], vec![], GlazewmIpc::NoAnswer)
                         .with_zebar_running(false),
+                ),
+                Some(
+                    Observation::new(vec![RECT], vec![], GlazewmIpc::NoAnswer)
+                        .with_glazewm_dialogs(vec![
+                            "Non-fatal error: No displayed workspace.".into(),
+                        ]),
                 ),
             ],
         };

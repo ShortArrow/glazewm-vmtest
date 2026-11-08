@@ -35,6 +35,9 @@ pub enum Step {
     ResumeTestWindow(u32),
     /// Clicks the middle of the test window with this id, as the user does, whether or not it processes messages.
     ClickTestWindow(u32),
+    /// Presses a keyboard shortcut, written as glazewm's configuration writes its bindings, such as `alt+shift+f`,
+    /// as the user does; a binding glazewm runs this way shows its errors in a dialog, as it does for the user.
+    PressShortcut(String),
     /// Starts a load in the guest, replacing a running load of the same kind.
     StartLoad(Load),
     /// Stops the running load of this kind, if any.
@@ -131,6 +134,9 @@ pub struct Scenario {
     pub steps: Vec<Step>,
     /// How long glazewm may take to answer one IPC query, measured in the guest.
     pub ipc_limit: Duration,
+    /// The beginnings of the texts of glazewm dialogs the scenario opens on purpose, which `glazewm_shows_no_dialog`
+    /// does not count.
+    pub allowed_dialogs: Vec<String>,
 }
 
 /// The IPC time limit a scenario uses unless it needs another.
@@ -213,6 +219,7 @@ pub struct Observation {
     test_windows: Vec<TestWindow>,
     glazewm: GlazewmIpc,
     zebar_running: Option<bool>,
+    glazewm_dialogs: Vec<String>,
 }
 
 impl Observation {
@@ -232,12 +239,19 @@ impl Observation {
             test_windows,
             glazewm,
             zebar_running: None,
+            glazewm_dialogs: vec![],
         }
     }
 
     /// Adds whether the zebar the harness deployed was running; an observation without it is of a guest with no zebar.
     pub fn with_zebar_running(mut self, running: bool) -> Self {
         self.zebar_running = Some(running);
+        self
+    }
+
+    /// Adds the text of each dialog glazewm had open.
+    pub fn with_glazewm_dialogs(mut self, dialogs: Vec<String>) -> Self {
+        self.glazewm_dialogs = dialogs;
         self
     }
 
@@ -253,6 +267,11 @@ impl Observation {
 
     pub fn glazewm(&self) -> &GlazewmIpc {
         &self.glazewm
+    }
+
+    /// The text of each dialog glazewm had open.
+    pub fn glazewm_dialogs(&self) -> &[String] {
+        &self.glazewm_dialogs
     }
 
     /// Whether the deployed zebar was running, or `None` when no zebar was deployed.

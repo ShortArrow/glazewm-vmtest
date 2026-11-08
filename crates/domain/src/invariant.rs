@@ -162,6 +162,29 @@ pub fn zebar_is_running(running: Option<bool>) -> Result<(), Violation> {
     }
 }
 
+/// Checks that glazewm had no dialog open when the guest was observed, other than ones whose text begins with one of
+/// `allowed`; `dialogs` holds the text of each one.
+///
+/// glazewm opens a dialog for an error it does not stop on, and on some commits stops answering until the user closes it.
+/// A scenario that makes glazewm fail on purpose, such as with a startup command naming a missing program, allows the
+/// dialog that failure opens.
+pub fn glazewm_shows_no_dialog(dialogs: &[String], allowed: &[String]) -> Result<(), Violation> {
+    let unexpected: Vec<&str> = dialogs
+        .iter()
+        .filter(|dialog| !allowed.iter().any(|text| dialog.starts_with(text.as_str())))
+        .map(String::as_str)
+        .collect();
+    if unexpected.is_empty() {
+        Ok(())
+    } else {
+        Err(Violation {
+            invariant: "glazewm_shows_no_dialog",
+            expected: "no glazewm dialog".into(),
+            observed: unexpected.join("; "),
+        })
+    }
+}
+
 /// Checks that glazewm answered the IPC query within the scenario's time limit.
 ///
 /// A glazewm that is not running was not asked, so `glazewm_is_running` judges it instead.
@@ -391,6 +414,44 @@ mod tests {
                 observed: "no zebar process".into(),
             })
         );
+    }
+
+    #[test]
+    fn holds_while_glazewm_has_no_dialog_open() {
+        assert_eq!(glazewm_shows_no_dialog(&[], &[]), Ok(()));
+    }
+
+    #[test]
+    fn is_violated_by_a_dialog_glazewm_has_open() {
+        let dialogs = ["Non-fatal error: No displayed workspace.".to_string()];
+
+        assert_eq!(
+            glazewm_shows_no_dialog(&dialogs, &[]),
+            Err(Violation {
+                invariant: "glazewm_shows_no_dialog",
+                expected: "no glazewm dialog".into(),
+                observed: "Non-fatal error: No displayed workspace.".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn holds_while_every_dialog_glazewm_has_open_begins_with_an_allowed_text() {
+        let dialogs = [
+            "Non-fatal error: Shell exec failed for 'zebar'.".to_string(),
+            "Non-fatal error: No displayed workspace.".to_string(),
+        ];
+        let allowed = ["Non-fatal error: Shell exec failed".to_string()];
+
+        assert_eq!(
+            glazewm_shows_no_dialog(&dialogs, &allowed),
+            Err(Violation {
+                invariant: "glazewm_shows_no_dialog",
+                expected: "no glazewm dialog".into(),
+                observed: "Non-fatal error: No displayed workspace.".into(),
+            })
+        );
+        assert_eq!(glazewm_shows_no_dialog(&dialogs[..1], &allowed), Ok(()));
     }
 
     #[test]

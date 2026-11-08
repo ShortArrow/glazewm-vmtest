@@ -23,8 +23,8 @@ fn main() -> std::io::Result<()> {
     use vmtest_guest_daemon::test_windows::LaunchedApp;
     use vmtest_guest_daemon::win32::{self, Win32Topology};
     use vmtest_guest_daemon::{
-        CliOutcome, DisplayPower, DisplayProjection, GlazewmCli, LoadHost, Pointer, SutProcesses,
-        TestWindowHost, TopologySource, listen_address, serve,
+        CliOutcome, DisplayPower, DisplayProjection, GlazewmCli, LoadHost, SutProcesses,
+        TestWindowHost, TopologySource, UserInput, listen_address, serve,
     };
     use vmtest_protocol::{
         DisplayDto, LoadKindDto, PresenceDto, ProjectionDto, SutProgram, TestWindowDto,
@@ -97,6 +97,10 @@ fn main() -> std::io::Result<()> {
             win32::image_is_running(&self.sut(program).executable())
         }
 
+        fn dialogs(&self, program: SutProgram) -> Result<Vec<String>, String> {
+            win32::dialogs_of_image(&self.sut(program).executable())
+        }
+
         fn start(&self, program: SutProgram) -> Result<(), String> {
             self.sut(program).start()
         }
@@ -108,7 +112,11 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    impl Pointer for LiveGuest {
+    impl UserInput for LiveGuest {
+        fn press_keys(&self, virtual_keys: &[u16]) -> Result<(), String> {
+            win32::press_keys(virtual_keys)
+        }
+
         fn click(&self, x: i32, y: i32) -> Result<(), String> {
             win32::click(x, y)
         }

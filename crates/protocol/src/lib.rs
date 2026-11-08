@@ -26,6 +26,10 @@ pub enum Request {
     SutRunning {
         program: SutProgram,
     },
+    /// Asks for the text of each dialog the SUT program the harness deployed has open, as its title and message.
+    SutDialogs {
+        program: SutProgram,
+    },
     /// Opens `count` more test windows and answers once each has been created.
     ///
     /// Without `within_ms`, each is opened once the one before is the foreground window; with it, they are
@@ -72,6 +76,11 @@ pub enum Request {
     /// Switches which displays the OS uses, as Win+P does; the monitors stay connected.
     SetProjection {
         projection: ProjectionDto,
+    },
+    /// Presses the keys of `shortcut`, written as glazewm's configuration writes its bindings, such as
+    /// `alt+shift+f`, in order, and releases them in reverse, as the user does.
+    PressShortcut {
+        shortcut: String,
     },
     /// Asks which window is the foreground window.
     ForegroundWindow,
@@ -135,6 +144,10 @@ pub enum Response {
     Running {
         running: bool,
     },
+    /// The text of each dialog, as `title: message`.
+    Dialogs {
+        texts: Vec<String>,
+    },
     TestWindowsOpened {
         ids: Vec<u32>,
     },
@@ -165,6 +178,9 @@ pub enum Response {
     },
     ProjectionSet {
         projection: ProjectionDto,
+    },
+    ShortcutPressed {
+        shortcut: String,
     },
     /// The handle of the foreground window, or `None` when no window is in the foreground.
     ForegroundWindow {
@@ -344,6 +360,16 @@ mod tests {
         assert_eq!(
             encode_line(&Request::Click { x: -640, y: 360 }),
             "{\"type\":\"click\",\"x\":-640,\"y\":360}\n"
+        );
+    }
+
+    #[test]
+    fn a_shortcut_is_written_as_glazewm_writes_its_bindings() {
+        assert_eq!(
+            encode_line(&Request::PressShortcut {
+                shortcut: "alt+shift+f".into()
+            }),
+            "{\"type\":\"press_shortcut\",\"shortcut\":\"alt+shift+f\"}\n"
         );
     }
 

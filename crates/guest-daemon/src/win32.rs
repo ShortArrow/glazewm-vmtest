@@ -24,12 +24,14 @@ use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_MOUSE, MOUSE_EVENT_FLAGS, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
-    MOUSEEVENTF_MOVE, MOUSEINPUT, SendInput,
+    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP,
+    MOUSE_EVENT_FLAGS, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEINPUT,
+    SendInput, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_STYLE, GetForegroundWindow, GetWindowLongPtrW, HWND_BROADCAST, IsWindow, PostMessageW,
-    SC_MONITORPOWER, SetCursorPos, WM_SYSCOMMAND, WS_CHILD,
+    EnumChildWindows, EnumWindows, GWL_STYLE, GetClassNameW, GetForegroundWindow,
+    GetWindowLongPtrW, GetWindowTextW, GetWindowThreadProcessId, HWND_BROADCAST, IsWindow,
+    IsWindowVisible, PostMessageW, SC_MONITORPOWER, SetCursorPos, WM_SYSCOMMAND, WS_CHILD,
 };
 use windows::core::{BOOL, PWSTR};
 
@@ -79,6 +81,28 @@ pub fn click(x: i32, y: i32) -> Result<(), String> {
         },
     };
     send(&[button(MOUSEEVENTF_LEFTDOWN), button(MOUSEEVENTF_LEFTUP)])
+}
+
+/// Presses the keys with `virtual_keys` in order and releases them in reverse.
+pub fn press_keys(virtual_keys: &[u16]) -> Result<(), String> {
+    let key = |code: u16, flags: KEYBD_EVENT_FLAGS| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(code),
+                dwFlags: flags,
+                ..Default::default()
+            },
+        },
+    };
+    let presses = virtual_keys
+        .iter()
+        .map(|&code| key(code, KEYBD_EVENT_FLAGS(0)));
+    let releases = virtual_keys
+        .iter()
+        .rev()
+        .map(|&code| key(code, KEYEVENTF_KEYUP));
+    send(&presses.chain(releases).collect::<Vec<_>>())
 }
 
 /// The handle of the foreground window, or `None` when no window is in the foreground.
@@ -270,6 +294,11 @@ pub fn window_frame(handle: i64) -> Option<RectDto> {
 /// Matching the path rather than the file name keeps a glazewm the guest may have installed itself from
 /// being taken for the one the harness deployed. Processes this user may not query are not that one.
 pub fn image_is_running(image: &Path) -> Result<bool, String> {
+    Ok(!image_processes(image)?.is_empty())
+}
+
+/// The ids of the processes running from the executable at `image`, compared by full path.
+fn image_processes(image: &Path) -> Result<Vec<u32>, String> {
     let wanted = image.to_string_lossy().to_lowercase();
     let Some(file_name) = image
         .file_name()
@@ -277,14 +306,93 @@ pub fn image_is_running(image: &Path) -> Result<bool, String> {
     else {
         return Err(format!("{} names no executable", image.display()));
     };
-    for (pid, exe_file) in processes()? {
-        if exe_file.to_lowercase() == file_name
-            && image_path(pid).is_some_and(|path| path.to_lowercase() == wanted)
-        {
-            return Ok(true);
-        }
+    Ok(processes()?
+        .into_iter()
+        .filter(|(pid, exe_file)| {
+            exe_file.to_lowercase() == file_name
+                && image_path(*pid).is_some_and(|path| path.to_lowercase() == wanted)
+        })
+        .map(|(pid, _)| pid)
+        .collect())
+}
+
+/// The class name Windows gives a dialog box, such as a message box.
+const DIALOG_CLASS: &str = "#32770";
+
+/// The text of each visible dialog that a process running from `image` owns, as its title, a colon, and the text of
+/// its static controls.
+pub fn dialogs_of_image(image: &Path) -> Result<Vec<String>, String> {
+    let pids = image_processes(image)?;
+    if pids.is_empty() {
+        return Ok(vec![]);
     }
-    Ok(false)
+    let mut windows: Vec<HWND> = Vec::new();
+    // SAFETY: `collect_window` only pushes into the `Vec` that `windows` points to, which outlives the call.
+    unsafe {
+        EnumWindows(
+            Some(collect_window),
+            LPARAM(&mut windows as *mut Vec<HWND> as isize),
+        )
+    }
+    .map_err(|error| format!("EnumWindows failed: {error}"))?;
+    Ok(windows
+        .into_iter()
+        .filter(|&window| {
+            let mut pid = 0;
+            // SAFETY: `window` came from `EnumWindows`; a window gone since then yields no pid.
+            unsafe { GetWindowThreadProcessId(window, Some(&mut pid)) };
+            pids.contains(&pid)
+                // SAFETY: As above.
+                && unsafe { IsWindowVisible(window) }.as_bool()
+                && class_name(window) == DIALOG_CLASS
+        })
+        .map(|window| {
+            let title = window_text(window);
+            match static_texts(window).join(" ") {
+                message if message.is_empty() => title,
+                message => format!("{title}: {message}"),
+            }
+        })
+        .collect())
+}
+
+unsafe extern "system" fn collect_window(window: HWND, windows: LPARAM) -> BOOL {
+    // SAFETY: Its callers pass a pointer to a live `Vec<HWND>` and nothing else holds it.
+    unsafe { (*(windows.0 as *mut Vec<HWND>)).push(window) };
+    BOOL(1)
+}
+
+/// The non-empty text of every static control in `dialog`, in the order the OS lists them.
+fn static_texts(dialog: HWND) -> Vec<String> {
+    let mut children: Vec<HWND> = Vec::new();
+    // SAFETY: `collect_window` only pushes into the `Vec` that `children` points to, which outlives the call.
+    let _ = unsafe {
+        EnumChildWindows(
+            Some(dialog),
+            Some(collect_window),
+            LPARAM(&mut children as *mut Vec<HWND> as isize),
+        )
+    };
+    children
+        .into_iter()
+        .filter(|&child| class_name(child) == "Static")
+        .map(window_text)
+        .filter(|text| !text.is_empty())
+        .collect()
+}
+
+fn class_name(window: HWND) -> String {
+    let mut buffer = [0u16; 256];
+    // SAFETY: The buffer outlives the call, which writes at most its length.
+    let length = unsafe { GetClassNameW(window, &mut buffer) };
+    String::from_utf16_lossy(&buffer[..length.max(0) as usize])
+}
+
+fn window_text(window: HWND) -> String {
+    let mut buffer = [0u16; 1024];
+    // SAFETY: As for `class_name`.
+    let length = unsafe { GetWindowTextW(window, &mut buffer) };
+    String::from_utf16_lossy(&buffer[..length.max(0) as usize])
 }
 
 /// Lists every process as its id and executable file name.

@@ -6,6 +6,7 @@ pub mod win32;
 pub mod limits;
 pub mod load;
 pub mod process;
+pub mod shortcut;
 pub mod test_windows;
 
 use std::io::{BufRead, Write};
@@ -52,6 +53,8 @@ pub trait SutProcesses {
     fn is_running(&self, program: SutProgram) -> Result<bool, String>;
     /// Starts `program`, as deployed by the harness, with no window of its own, and returns once its process exists.
     fn start(&self, program: SutProgram) -> Result<(), String>;
+    /// The text of each dialog `program`, as deployed by the harness, has open, as `title: message`.
+    fn dialogs(&self, program: SutProgram) -> Result<Vec<String>, String>;
 }
 
 /// Opens test windows through a test-window application and reads where they are.
@@ -88,11 +91,14 @@ pub trait DisplayProjection {
     fn set_projection(&self, projection: ProjectionDto) -> Result<(), String>;
 }
 
-/// The mouse and the foreground window of the interactive session.
-pub trait Pointer {
+/// The mouse, the keyboard and the foreground window of the interactive session.
+pub trait UserInput {
     /// Moves the mouse to `x`, `y`, in virtual-screen coordinates and physical pixels, clicks the left button there,
     /// and returns once the OS has taken the input.
     fn click(&self, x: i32, y: i32) -> Result<(), String>;
+    /// Presses the keys with `virtual_keys` in order, releases them in reverse, and returns once the OS has taken
+    /// the input.
+    fn press_keys(&self, virtual_keys: &[u16]) -> Result<(), String>;
     /// The handle of the foreground window, or `None` when no window is in the foreground.
     fn foreground_window(&self) -> Result<Option<i64>, String>;
 }
@@ -106,7 +112,7 @@ pub trait Guest:
     + LoadHost
     + DisplayPower
     + DisplayProjection
-    + Pointer
+    + UserInput
 {
 }
 
@@ -118,7 +124,7 @@ impl<T> Guest for T where
         + LoadHost
         + DisplayPower
         + DisplayProjection
-        + Pointer
+        + UserInput
 {
 }
 
@@ -144,6 +150,10 @@ pub fn handle(request: Request, guest: &dyn Guest) -> Response {
         }
         Request::StartSut { program } => match guest.start(program) {
             Ok(()) => Response::SutStarted { program },
+            Err(message) => Response::Error { message },
+        },
+        Request::SutDialogs { program } => match guest.dialogs(program) {
+            Ok(texts) => Response::Dialogs { texts },
             Err(message) => Response::Error { message },
         },
         Request::SutRunning { program } => match guest.is_running(program) {
@@ -197,6 +207,12 @@ pub fn handle(request: Request, guest: &dyn Guest) -> Response {
             Ok(()) => Response::ProjectionSet { projection },
             Err(message) => Response::Error { message },
         },
+        Request::PressShortcut { shortcut } => {
+            match shortcut::virtual_keys(&shortcut).and_then(|keys| guest.press_keys(&keys)) {
+                Ok(()) => Response::ShortcutPressed { shortcut },
+                Err(message) => Response::Error { message },
+            }
+        }
         Request::ForegroundWindow => match guest.foreground_window() {
             Ok(handle) => Response::ForegroundWindow { handle },
             Err(message) => Response::Error { message },
@@ -268,6 +284,9 @@ mod tests {
     }
 
     impl SutProcesses for FixedWindows {
+        fn dialogs(&self, _program: SutProgram) -> Result<Vec<String>, String> {
+            Ok(vec!["Non-fatal error: No displayed workspace.".into()])
+        }
         fn is_running(&self, _program: SutProgram) -> Result<bool, String> {
             Err("no processes in this fake".into())
         }
@@ -292,7 +311,11 @@ mod tests {
         }
     }
 
-    impl Pointer for FixedWindows {
+    impl UserInput for FixedWindows {
+        fn press_keys(&self, _virtual_keys: &[u16]) -> Result<(), String> {
+            Ok(())
+        }
+
         fn click(&self, _x: i32, _y: i32) -> Result<(), String> {
             Ok(())
         }
@@ -484,6 +507,54 @@ mod tests {
     }
 
     #[test]
+    fn answers_that_it_pressed_a_shortcut_or_which_key_it_does_not_know() {
+        let guest = FixedWindows {
+            opened: Ok(vec![]),
+            windows: vec![],
+        };
+        let press = |shortcut: &str| {
+            handle(
+                Request::PressShortcut {
+                    shortcut: shortcut.into(),
+                },
+                &guest,
+            )
+        };
+
+        assert_eq!(
+            (press("alt+shift+f"), press("alt+f13")),
+            (
+                Response::ShortcutPressed {
+                    shortcut: "alt+shift+f".into()
+                },
+                Response::Error {
+                    message: "unknown key `f13` in shortcut `alt+f13`".into()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn answers_with_the_text_of_each_dialog_a_sut_program_has_open() {
+        let guest = FixedWindows {
+            opened: Ok(vec![]),
+            windows: vec![],
+        };
+
+        assert_eq!(
+            handle(
+                Request::SutDialogs {
+                    program: SutProgram::Glazewm
+                },
+                &guest
+            ),
+            Response::Dialogs {
+                texts: vec!["Non-fatal error: No displayed workspace.".into()]
+            }
+        );
+    }
+
+    #[test]
     fn answers_why_it_cannot_click() {
         let guest = FixedProcesses(Ok(false));
 
@@ -538,7 +609,11 @@ mod tests {
         }
     }
 
-    impl Pointer for FixedProcesses {
+    impl UserInput for FixedProcesses {
+        fn press_keys(&self, _virtual_keys: &[u16]) -> Result<(), String> {
+            Err("no keyboard in this fake".into())
+        }
+
         fn click(&self, _x: i32, _y: i32) -> Result<(), String> {
             Err("no mouse in this fake".into())
         }
@@ -583,6 +658,9 @@ mod tests {
     }
 
     impl SutProcesses for FixedProcesses {
+        fn dialogs(&self, _program: SutProgram) -> Result<Vec<String>, String> {
+            Err("no processes in this fake".into())
+        }
         fn is_running(&self, program: SutProgram) -> Result<bool, String> {
             assert_eq!(program, SutProgram::Glazewm);
             self.0.clone()
@@ -659,6 +737,9 @@ mod tests {
     }
 
     impl SutProcesses for FixedTopology {
+        fn dialogs(&self, _program: SutProgram) -> Result<Vec<String>, String> {
+            Err("no processes in this fake".into())
+        }
         fn is_running(&self, _program: SutProgram) -> Result<bool, String> {
             Err("no processes in this fake".into())
         }
@@ -673,7 +754,11 @@ mod tests {
         }
     }
 
-    impl Pointer for FixedTopology {
+    impl UserInput for FixedTopology {
+        fn press_keys(&self, _virtual_keys: &[u16]) -> Result<(), String> {
+            Err("no keyboard in this fake".into())
+        }
+
         fn click(&self, _x: i32, _y: i32) -> Result<(), String> {
             Err("no mouse in this fake".into())
         }
@@ -747,6 +832,9 @@ mod tests {
     }
 
     impl SutProcesses for FakeCli {
+        fn dialogs(&self, _program: SutProgram) -> Result<Vec<String>, String> {
+            Err("no processes in this fake".into())
+        }
         fn is_running(&self, _program: SutProgram) -> Result<bool, String> {
             Err("no processes in this fake".into())
         }
@@ -761,7 +849,11 @@ mod tests {
         }
     }
 
-    impl Pointer for FakeCli {
+    impl UserInput for FakeCli {
+        fn press_keys(&self, _virtual_keys: &[u16]) -> Result<(), String> {
+            Err("no keyboard in this fake".into())
+        }
+
         fn click(&self, _x: i32, _y: i32) -> Result<(), String> {
             Err("no mouse in this fake".into())
         }
