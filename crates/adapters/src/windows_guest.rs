@@ -82,6 +82,8 @@ pub struct WindowsGuest<H> {
     hypervisor: H,
     daemon: Option<GuestDaemonClient<TcpStream>>,
     daemon_forward: Option<Child>,
+    /// Whether the guest OS was last told to use the PC screen alone, as Win+P does; a restore forgets it.
+    uses_only_the_pc_screen: bool,
 }
 
 /// The name the virtual display driver gives its device and its display adapter.
@@ -103,6 +105,7 @@ impl<H> WindowsGuest<H> {
             hypervisor,
             daemon: None,
             daemon_forward: None,
+            uses_only_the_pc_screen: false,
         }
     }
 
@@ -440,6 +443,7 @@ impl<H> Drop for WindowsGuest<H> {
 impl<H: Hypervisor> Hypervisor for WindowsGuest<H> {
     fn restore(&mut self) -> Result<(), String> {
         self.close_daemon_forward();
+        self.uses_only_the_pc_screen = false;
         self.hypervisor.restore()
     }
 }
@@ -514,9 +518,12 @@ impl<H> DisplayController for WindowsGuest<H> {
         settable_virtual_monitor_count(count)?;
         self.ssh(&virtual_monitor_count_command(count))?;
         poll(VIRTUAL_MONITORS_LIMIT, "the virtual monitors", || {
-            virtual_monitors_in_place(&self.displays()?, count, || {
-                self.connected_virtual_monitors()
-            })
+            virtual_monitors_in_place(
+                &self.displays()?,
+                count,
+                self.uses_only_the_pc_screen,
+                || self.connected_virtual_monitors(),
+            )
         })
     }
 
@@ -555,7 +562,10 @@ impl<H> DisplayController for WindowsGuest<H> {
             Projection::SecondScreenOnly => ProjectionDto::SecondScreenOnly,
         };
         match self.request(&Request::SetProjection { projection: dto })? {
-            Response::ProjectionSet { projection: set } if set == dto => Ok(()),
+            Response::ProjectionSet { projection: set } if set == dto => {
+                self.uses_only_the_pc_screen = projection == Projection::PcScreenOnly;
+                Ok(())
+            }
             other => Err(format!(
                 "unexpected answer to switching to {projection:?}: {other:?}"
             )),
@@ -800,11 +810,15 @@ fn settable_virtual_monitor_count(count: u32) -> Result<(), String> {
     }
 }
 
-/// Succeeds when the OS shows `count` displays driven by the virtual display driver among `displays`, or, while it
-/// uses none of them, as with PC screen only, when `connected` counts that many of the driver's monitors.
+/// Succeeds when the OS shows `count` displays driven by the virtual display driver among `displays`, or, when it
+/// `uses_only_the_pc_screen` and shows none of them, when `connected` counts that many of the driver's monitors.
+///
+/// A monitor that arrives while the OS extends its desktop is connected for a moment before the OS shows it, so being
+/// connected counts only while the OS was told to use the PC screen alone.
 fn virtual_monitors_in_place(
     displays: &[DisplayDto],
     count: u32,
+    uses_only_the_pc_screen: bool,
     connected: impl FnOnce() -> Result<usize, String>,
 ) -> Result<(), String> {
     let shown = displays
@@ -814,7 +828,7 @@ fn virtual_monitors_in_place(
     if shown == count as usize {
         return Ok(());
     }
-    if shown > 0 {
+    if shown > 0 || !uses_only_the_pc_screen {
         return Err(format!("the OS shows {shown} of {count} virtual monitors"));
     }
     match connected()? {
@@ -931,7 +945,10 @@ mod tests {
             display("Virtual Display Driver"),
         ];
 
-        assert_eq!(virtual_monitors_in_place(&shown, 1, not_asked), Ok(()));
+        assert_eq!(
+            virtual_monitors_in_place(&shown, 1, false, not_asked),
+            Ok(())
+        );
     }
 
     fn not_asked() -> Result<usize, String> {
@@ -939,19 +956,32 @@ mod tests {
     }
 
     #[test]
-    fn the_virtual_monitors_are_in_place_when_the_os_connects_that_many_while_using_none_of_them() {
+    fn the_virtual_monitors_are_in_place_when_the_os_connects_that_many_while_using_only_the_pc_screen()
+     {
         let shown = [display("Microsoft Hyper-V Video")];
 
-        assert_eq!(virtual_monitors_in_place(&shown, 2, || Ok(2)), Ok(()));
+        assert_eq!(virtual_monitors_in_place(&shown, 2, true, || Ok(2)), Ok(()));
     }
 
     #[test]
-    fn the_virtual_monitors_are_not_in_place_while_the_os_uses_none_of_them_and_connects_fewer() {
+    fn the_virtual_monitors_are_not_in_place_while_the_os_uses_only_the_pc_screen_and_connects_fewer()
+     {
         let shown = [display("Microsoft Hyper-V Video")];
 
         assert_eq!(
-            virtual_monitors_in_place(&shown, 2, || Ok(1)),
+            virtual_monitors_in_place(&shown, 2, true, || Ok(1)),
             Err("the OS shows 0 of 2 virtual monitors and connects 1".into())
+        );
+    }
+
+    #[test]
+    fn the_virtual_monitors_are_not_in_place_while_connected_but_not_yet_shown_on_an_extended_desktop()
+     {
+        let shown = [display("Microsoft Hyper-V Video")];
+
+        assert_eq!(
+            virtual_monitors_in_place(&shown, 2, false, || Ok(2)),
+            Err("the OS shows 0 of 2 virtual monitors".into())
         );
     }
 
@@ -999,7 +1029,7 @@ mod tests {
         ];
 
         assert_eq!(
-            virtual_monitors_in_place(&shown, 3, || Ok(3)),
+            virtual_monitors_in_place(&shown, 3, false, || Ok(3)),
             Err("the OS shows 1 of 3 virtual monitors".into())
         );
     }
