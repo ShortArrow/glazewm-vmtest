@@ -649,3 +649,37 @@ fn every_monitor_displays_a_workspace_when_monitors_unplug_while_unused_and_retu
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed; 7]);
 }
+
+/// Monitors that Win+P leaves unused may drop their hot-plug signal and raise it again several times while they go to
+/// standby, and again while they wake when the user switches back to extend.
+#[test]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
+fn every_monitor_displays_a_workspace_when_monitors_flap_around_projection_switches() {
+    let flap = || Step::FlapVirtualMonitors {
+        times: 3,
+        apart: Duration::from_millis(500),
+    };
+    let scenario = Scenario {
+        name: "monitors flap around Win+P switches".into(),
+        virtual_monitors: 2,
+        steps: vec![
+            Step::SwitchProjection(Projection::PcScreenOnly),
+            flap(),
+            Step::SwitchProjection(Projection::Extend),
+            flap(),
+            Step::PressShortcut("alt+shift+f".into()),
+            Step::PressShortcut("alt+shift+a".into()),
+        ],
+        ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
+    };
+    let mut guest = guest(
+        "glazewm-config-mostly-kept-alive.yaml",
+        &mostly_kept_alive_config(),
+    );
+
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    assert_eq!(verdicts, vec![StepVerdict::Passed; 7]);
+}
