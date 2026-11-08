@@ -578,3 +578,39 @@ fn every_monitor_displays_a_workspace_after_switching_projections() {
         )
     );
 }
+
+/// The workspace moves use the keyboard shortcuts of glazewm's sample configuration, `alt+shift+f` to the monitor on
+/// the right and `alt+shift+a` to the one on the left.
+#[test]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
+fn every_monitor_displays_a_workspace_when_workspaces_move_between_projection_switches() {
+    let right = || Step::PressShortcut("alt+shift+f".into());
+    let left = || Step::PressShortcut("alt+shift+a".into());
+    let scenario = Scenario {
+        name: "move workspaces between Win+P switches".into(),
+        virtual_monitors: 2,
+        steps: vec![
+            Step::SwitchProjection(Projection::PcScreenOnly),
+            Step::SwitchProjection(Projection::Extend),
+            right(),
+            right(),
+            left(),
+            Step::SwitchProjection(Projection::PcScreenOnly),
+            right(),
+            Step::SwitchProjection(Projection::Extend),
+            right(),
+            left(),
+        ],
+        ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
+    };
+    let mut guest = guest(
+        "glazewm-config-mostly-kept-alive.yaml",
+        &mostly_kept_alive_config(),
+    );
+
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    assert_eq!(verdicts, vec![StepVerdict::Passed; 11]);
+}
