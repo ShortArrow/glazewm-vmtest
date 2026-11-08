@@ -152,8 +152,8 @@ pub fn make_dpi_aware() -> Result<(), String> {
 
 /// Reads displays with `EnumDisplayMonitors` from the session the process runs in.
 ///
-/// The enumeration fails now and then while the OS is changing its displays, so a failure is retried a few times
-/// before it is reported.
+/// The enumeration fails now and then while the OS is changing its displays, and a monitor it found may be gone
+/// before it is described, so either failure is retried a few times before it is reported.
 pub struct Win32Topology;
 
 /// How many times, and how far apart, a failed display enumeration is tried again.
@@ -162,16 +162,28 @@ const ENUMERATION_RETRY_PAUSE: std::time::Duration = std::time::Duration::from_m
 
 impl TopologySource for Win32Topology {
     fn displays(&self) -> Result<Vec<DisplayDto>, String> {
-        let mut last_error = String::new();
-        for _ in 0..=ENUMERATION_RETRIES {
-            match monitors() {
-                Ok(monitors) => return monitors.into_iter().map(describe).collect(),
-                Err(error) => last_error = error,
-            }
-            std::thread::sleep(ENUMERATION_RETRY_PAUSE);
-        }
-        Err(last_error)
+        read_displays(monitors, describe, || {
+            std::thread::sleep(ENUMERATION_RETRY_PAUSE)
+        })
     }
+}
+
+/// Describes every monitor that `enumerate` finds, enumerating again after `pause` when either fails, up to
+/// `ENUMERATION_RETRIES` times.
+fn read_displays<M>(
+    enumerate: impl Fn() -> Result<Vec<M>, String>,
+    describe: impl Fn(M) -> Result<DisplayDto, String>,
+    mut pause: impl FnMut(),
+) -> Result<Vec<DisplayDto>, String> {
+    let mut last_error = String::new();
+    for _ in 0..=ENUMERATION_RETRIES {
+        match enumerate().and_then(|monitors| monitors.into_iter().map(&describe).collect()) {
+            Ok(displays) => return Ok(displays),
+            Err(error) => last_error = error,
+        }
+        pause();
+    }
+    Err(last_error)
 }
 
 fn monitors() -> Result<Vec<HMONITOR>, String> {
@@ -483,6 +495,44 @@ mod tests {
             .with_file_name("vmtest-not-running.exe");
 
         assert_eq!(image_is_running(&path), Ok(false));
+    }
+
+    fn display(device_name: &str) -> DisplayDto {
+        let rect = RectDto {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        };
+        DisplayDto {
+            device_name: device_name.into(),
+            adapter: "adapter".into(),
+            bounds: rect,
+            working_area: rect,
+            is_primary: false,
+        }
+    }
+
+    #[test]
+    fn enumerates_again_when_a_monitor_is_gone_before_it_is_described() {
+        let enumerations = std::cell::Cell::new(0);
+        let enumerate = || {
+            enumerations.set(enumerations.get() + 1);
+            Ok(if enumerations.get() == 1 {
+                vec!["gone", "kept"]
+            } else {
+                vec!["kept"]
+            })
+        };
+        let describe = |monitor: &str| match monitor {
+            "gone" => Err("GetMonitorInfoW failed".to_string()),
+            name => Ok(display(name)),
+        };
+
+        assert_eq!(
+            read_displays(enumerate, describe, || {}),
+            Ok(vec![display("kept")])
+        );
     }
 
     #[test]
