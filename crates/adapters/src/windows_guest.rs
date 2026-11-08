@@ -242,7 +242,9 @@ impl<H> WindowsGuest<H> {
     /// How many monitors of the virtual display driver the guest OS has connected, whether or not it uses them.
     fn connected_virtual_monitors(&self) -> Result<usize, String> {
         let output = self.ssh(&format!(
-            "$d = (Get-PnpDevice -FriendlyName '{VIRTUAL_DISPLAY_DRIVER}').InstanceId;              @(Get-PnpDevice -Class Monitor -PresentOnly | Where-Object {{              (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName DEVPKEY_Device_Parent).Data -eq $d }}).Count"
+            "$d = (Get-PnpDevice -FriendlyName '{VIRTUAL_DISPLAY_DRIVER}').InstanceId; \
+             @(Get-PnpDevice -Class Monitor -PresentOnly | Where-Object {{ \
+             (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName DEVPKEY_Device_Parent).Data -eq $d }}).Count"
         ))?;
         output.trim().parse().map_err(|error| {
             format!(
@@ -532,6 +534,11 @@ impl<H> DisplayController for WindowsGuest<H> {
         .map(|_| ())
     }
 
+    fn flap_virtual_monitors(&mut self, times: u32, apart: Duration) -> Result<(), String> {
+        self.ssh(&flap_virtual_monitors_command(times, apart))
+            .map(|_| ())
+    }
+
     fn turn_displays_off(&mut self) -> Result<(), String> {
         self.set_display_power(false)
     }
@@ -773,6 +780,17 @@ fn virtual_monitor_count_command(count: u32) -> String {
     )
 }
 
+/// Runs in the guest, so that the changes are `apart` from each other however long a command over SSH takes.
+fn flap_virtual_monitors_command(times: u32, apart: Duration) -> String {
+    let apart = apart.as_millis();
+    format!(
+        "$d = Get-PnpDevice -FriendlyName '{VIRTUAL_DISPLAY_DRIVER}'; \
+         foreach ($i in 1..{times}) {{ \
+         $d | Disable-PnpDevice -Confirm:$false; Start-Sleep -Milliseconds {apart}; \
+         $d | Enable-PnpDevice -Confirm:$false; if ($i -lt {times}) {{ Start-Sleep -Milliseconds {apart} }} }}"
+    )
+}
+
 /// The virtual display driver stops working when asked for no monitors, until the guest is restored.
 fn settable_virtual_monitor_count(count: u32) -> Result<(), String> {
     if count == 0 {
@@ -954,6 +972,17 @@ mod tests {
              $s = 'C:\\VirtualDisplayDriver\\vdd_settings.xml'; \
              (Get-Content -Raw $s) -replace '<count>\\d+</count>', '<count>2</count>' | Set-Content -NoNewline $s; \
              $d | Enable-PnpDevice -Confirm:$false"
+        );
+    }
+
+    #[test]
+    fn flaps_the_virtual_monitors_in_one_command_and_ends_with_them_brought_back() {
+        assert_eq!(
+            flap_virtual_monitors_command(3, Duration::from_millis(300)),
+            "$d = Get-PnpDevice -FriendlyName 'Virtual Display Driver'; \
+             foreach ($i in 1..3) { \
+             $d | Disable-PnpDevice -Confirm:$false; Start-Sleep -Milliseconds 300; \
+             $d | Enable-PnpDevice -Confirm:$false; if ($i -lt 3) { Start-Sleep -Milliseconds 300 } }"
         );
     }
 

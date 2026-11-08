@@ -35,6 +35,9 @@ pub trait DisplayController {
     fn set_virtual_monitor_count(&mut self, count: u32) -> Result<(), String>;
     fn remove_virtual_monitors(&mut self) -> Result<(), String>;
     fn restore_virtual_monitors(&mut self) -> Result<(), String>;
+    /// Removes every virtual monitor and brings it back `times` times, `apart` between each change, and returns once
+    /// the last one has been brought back, without waiting for the guest OS to show the monitors.
+    fn flap_virtual_monitors(&mut self, times: u32, apart: Duration) -> Result<(), String>;
     /// Turns every display off and returns once the guest OS has been asked to.
     fn turn_displays_off(&mut self) -> Result<(), String>;
     /// Wakes the displays with input and returns once the guest OS has been given it.
@@ -140,6 +143,7 @@ fn apply(
         }
         Step::RemoveVirtualMonitors => guest.remove_virtual_monitors(),
         Step::RestoreVirtualMonitors => guest.restore_virtual_monitors(),
+        Step::FlapVirtualMonitors { times, apart } => guest.flap_virtual_monitors(*times, *apart),
         Step::TurnDisplaysOff => guest.turn_displays_off(),
         Step::WakeDisplays => guest.wake_displays(),
         Step::SwitchProjection(projection) => guest.set_projection(*projection),
@@ -303,6 +307,11 @@ mod tests {
         }
         fn restore_virtual_monitors(&mut self) -> Result<(), String> {
             self.log.push("restore_virtual_monitors".into());
+            Ok(())
+        }
+        fn flap_virtual_monitors(&mut self, times: u32, apart: Duration) -> Result<(), String> {
+            self.log
+                .push(format!("flap_virtual_monitors {times} {apart:?}"));
             Ok(())
         }
         fn turn_displays_off(&mut self) -> Result<(), String> {
@@ -534,6 +543,28 @@ mod tests {
         assert_eq!(
             guest.log.last().unwrap(),
             "open_test_windows TestWindowBatch { count: 3, within: Some(200ms), lifetime: DestroyedAfter(0ns) }"
+        );
+    }
+
+    #[test]
+    fn flaps_the_virtual_monitors_as_one_step() {
+        let mut guest = FakeGuest::observing(vec![observed(2, 2)]);
+        let step = Step::FlapVirtualMonitors {
+            times: 3,
+            apart: Duration::from_millis(300),
+        };
+
+        let outcomes = run(
+            &scenario(vec![step]),
+            &mut guest,
+            &mut FakeClock(Duration::ZERO),
+            SETTLE,
+        )
+        .unwrap();
+
+        assert_eq!(
+            (guest.log.last().map(String::as_str), outcomes.len()),
+            (Some("flap_virtual_monitors 3 300ms"), 2)
         );
     }
 

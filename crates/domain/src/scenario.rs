@@ -22,6 +22,12 @@ pub enum Step {
     RemoveVirtualMonitors,
     /// Brings back the virtual monitors removed by `RemoveVirtualMonitors`.
     RestoreVirtualMonitors,
+    /// Removes every virtual monitor and brings it back `times` times, `apart` between each change, without waiting for
+    /// the guest OS in between, as monitors waking from standby drop their hot-plug signal and raise it again.
+    FlapVirtualMonitors {
+        times: u32,
+        apart: Duration,
+    },
     /// Turns every display off, as the OS does when the user is away; the monitors stay connected.
     TurnDisplaysOff,
     /// Wakes the displays with input, as the user does on returning.
