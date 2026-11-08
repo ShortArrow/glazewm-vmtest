@@ -105,16 +105,35 @@ where
         + InputController
         + Observer,
 {
-    guest.restore()?;
-    guest.wait_until_ready()?;
-    guest.set_virtual_monitor_count(scenario.virtual_monitors)?;
-    guest.start_sut(scenario.ipc_limit)?;
+    let during = |stage: String| move |error: String| format!("{stage}: {error}");
+    guest
+        .restore()
+        .map_err(during("restoring the guest".into()))?;
+    guest
+        .wait_until_ready()
+        .map_err(during("waiting for the guest".into()))?;
+    guest
+        .set_virtual_monitor_count(scenario.virtual_monitors)
+        .map_err(during(format!(
+            "setting up {} virtual monitors",
+            scenario.virtual_monitors
+        )))?;
+    guest
+        .start_sut(scenario.ipc_limit)
+        .map_err(during("starting the SUT".into()))?;
     let mut loads = ActiveLoads::default();
-    let mut outcomes = vec![settled_outcome(scenario, &loads, guest, clock, settle)?];
-    for step in &scenario.steps {
-        apply(step, scenario, guest, clock, settle)?;
+    let mut outcomes = vec![
+        settled_outcome(scenario, &loads, guest, clock, settle)
+            .map_err(during("observing before the first step".into()))?,
+    ];
+    for (number, step) in (1..).zip(&scenario.steps) {
+        apply(step, scenario, guest, clock, settle)
+            .map_err(during(format!("step {number} ({step:?})")))?;
         loads.apply(step);
-        outcomes.push(settled_outcome(scenario, &loads, guest, clock, settle)?);
+        outcomes.push(
+            settled_outcome(scenario, &loads, guest, clock, settle)
+                .map_err(during(format!("observing after step {number}")))?,
+        );
     }
     Ok(outcomes)
 }
@@ -265,6 +284,10 @@ mod tests {
         log: Vec<String>,
         observations: Vec<Observation>,
         ipc_limits: Vec<Duration>,
+        /// What opening test windows fails with, if it does.
+        opening_error: Option<String>,
+        /// How many observations succeed before every later one fails.
+        observations_before_failure: Option<usize>,
     }
 
     impl FakeGuest {
@@ -273,6 +296,8 @@ mod tests {
                 log: Vec::new(),
                 observations,
                 ipc_limits: Vec::new(),
+                opening_error: None,
+                observations_before_failure: None,
             }
         }
     }
@@ -331,7 +356,7 @@ mod tests {
     impl WorkloadController for FakeGuest {
         fn open_test_windows(&mut self, batch: &TestWindowBatch) -> Result<(), String> {
             self.log.push(format!("open_test_windows {batch:?}"));
-            Ok(())
+            self.opening_error.clone().map_or(Ok(()), Err)
         }
         fn hang_test_window(&mut self, id: u32) -> Result<(), String> {
             self.log.push(format!("hang_test_window {id}"));
@@ -365,6 +390,9 @@ mod tests {
 
     impl Observer for FakeGuest {
         fn observe(&mut self, ipc_limit: Duration) -> Result<Observation, String> {
+            if self.observations_before_failure == Some(self.ipc_limits.len()) {
+                return Err("timed out".into());
+            }
             self.ipc_limits.push(ipc_limit);
             if self.observations.len() > 1 {
                 Ok(self.observations.remove(0))
@@ -544,6 +572,43 @@ mod tests {
             guest.log.last().unwrap(),
             "open_test_windows TestWindowBatch { count: 3, within: Some(200ms), lifetime: DestroyedAfter(0ns) }"
         );
+    }
+
+    #[test]
+    fn names_the_step_whose_command_failed() {
+        let mut guest = FakeGuest::observing(vec![observed(2, 2)]);
+        guest.opening_error = Some("timed out".into());
+        let step = Step::OpenTestWindows(TestWindowBatch::persistent(2));
+
+        let error = run(
+            &scenario(vec![step.clone()]),
+            &mut guest,
+            &mut FakeClock(Duration::ZERO),
+            SETTLE,
+        )
+        .unwrap_err();
+
+        assert_eq!(error, format!("step 1 ({step:?}): timed out"));
+    }
+
+    #[test]
+    fn names_the_step_after_which_observing_failed() {
+        let mut guest = FakeGuest::observing(vec![observed(2, 2)]);
+        let mut clock = FakeClock(Duration::ZERO);
+        run(&scenario(vec![]), &mut guest, &mut clock, SETTLE).unwrap();
+        let observations_before_the_first_step = guest.ipc_limits.len();
+        let mut guest = FakeGuest::observing(vec![observed(2, 2)]);
+        guest.observations_before_failure = Some(observations_before_the_first_step);
+
+        let error = run(
+            &scenario(vec![Step::TurnDisplaysOff]),
+            &mut guest,
+            &mut FakeClock(Duration::ZERO),
+            SETTLE,
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "observing after step 1: timed out");
     }
 
     #[test]
