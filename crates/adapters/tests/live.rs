@@ -614,3 +614,38 @@ fn every_monitor_displays_a_workspace_when_workspaces_move_between_projection_sw
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed; 11]);
 }
+
+/// After Win+P stops using them, monitors that sleep or switch to another input drop their hot-plug signal, so the
+/// OS sees them unplugged. They come back one after another while the guest still uses only the PC screen, and the
+/// user then switches back to extend. The virtual display driver brings its monitors back by count, so the second
+/// one's return briefly drops the first again.
+#[test]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
+fn every_monitor_displays_a_workspace_when_monitors_unplug_while_unused_and_return_one_by_one() {
+    let scenario = Scenario {
+        name: "monitors unplug after Win+P and return one by one".into(),
+        virtual_monitors: 2,
+        steps: vec![
+            Step::SwitchProjection(Projection::PcScreenOnly),
+            Step::RemoveVirtualMonitors,
+            Step::SetVirtualMonitorCounts {
+                counts: vec![1, 2],
+                apart: Duration::from_secs(2),
+            },
+            Step::SwitchProjection(Projection::Extend),
+            Step::PressShortcut("alt+shift+f".into()),
+            Step::PressShortcut("alt+shift+a".into()),
+        ],
+        ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
+    };
+    let mut guest = guest(
+        "glazewm-config-mostly-kept-alive.yaml",
+        &mostly_kept_alive_config(),
+    );
+
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    assert_eq!(verdicts, vec![StepVerdict::Passed; 7]);
+}
