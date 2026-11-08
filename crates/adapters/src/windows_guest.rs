@@ -239,6 +239,19 @@ impl<H> WindowsGuest<H> {
         }
     }
 
+    /// How many monitors of the virtual display driver the guest OS has connected, whether or not it uses them.
+    fn connected_virtual_monitors(&self) -> Result<usize, String> {
+        let output = self.ssh(&format!(
+            "$d = (Get-PnpDevice -FriendlyName '{VIRTUAL_DISPLAY_DRIVER}').InstanceId;              @(Get-PnpDevice -Class Monitor -PresentOnly | Where-Object {{              (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName DEVPKEY_Device_Parent).Data -eq $d }}).Count"
+        ))?;
+        output.trim().parse().map_err(|error| {
+            format!(
+                "cannot read the connected virtual monitors from `{}`: {error}",
+                output.trim()
+            )
+        })
+    }
+
     /// Queries glazewm's monitors, telling the test windows among its windows apart by `test_windows`,
     /// pairs of id and handle, and asking the guest what the OS says of each window.
     fn query_glazewm_monitors(
@@ -499,7 +512,9 @@ impl<H> DisplayController for WindowsGuest<H> {
         settable_virtual_monitor_count(count)?;
         self.ssh(&virtual_monitor_count_command(count))?;
         poll(VIRTUAL_MONITORS_LIMIT, "the virtual monitors", || {
-            virtual_monitors_in_place(&self.displays()?, count)
+            virtual_monitors_in_place(&self.displays()?, count, || {
+                self.connected_virtual_monitors()
+            })
         })
     }
 
@@ -746,7 +761,6 @@ fn wait_until_forwarding(
     ))
 }
 
-/// Succeeds when the OS shows `count` displays driven by the virtual display driver among `displays`.
 /// Sets the count in the driver's settings while its device is disabled, since the driver reads the count only when
 /// it starts, and its own request for a new count restarts it by crashing, which Windows allows only a few times.
 fn virtual_monitor_count_command(count: u32) -> String {
@@ -768,15 +782,28 @@ fn settable_virtual_monitor_count(count: u32) -> Result<(), String> {
     }
 }
 
-fn virtual_monitors_in_place(displays: &[DisplayDto], count: u32) -> Result<(), String> {
+/// Succeeds when the OS shows `count` displays driven by the virtual display driver among `displays`, or, while it
+/// uses none of them, as with PC screen only, when `connected` counts that many of the driver's monitors.
+fn virtual_monitors_in_place(
+    displays: &[DisplayDto],
+    count: u32,
+    connected: impl FnOnce() -> Result<usize, String>,
+) -> Result<(), String> {
     let shown = displays
         .iter()
         .filter(|display| display.adapter == VIRTUAL_DISPLAY_DRIVER)
         .count();
     if shown == count as usize {
-        Ok(())
-    } else {
-        Err(format!("the OS shows {shown} of {count} virtual monitors"))
+        return Ok(());
+    }
+    if shown > 0 {
+        return Err(format!("the OS shows {shown} of {count} virtual monitors"));
+    }
+    match connected()? {
+        connected if connected == count as usize => Ok(()),
+        connected => Err(format!(
+            "the OS shows 0 of {count} virtual monitors and connects {connected}"
+        )),
     }
 }
 
@@ -886,7 +913,28 @@ mod tests {
             display("Virtual Display Driver"),
         ];
 
-        assert_eq!(virtual_monitors_in_place(&shown, 1), Ok(()));
+        assert_eq!(virtual_monitors_in_place(&shown, 1, not_asked), Ok(()));
+    }
+
+    fn not_asked() -> Result<usize, String> {
+        Err("not asked".into())
+    }
+
+    #[test]
+    fn the_virtual_monitors_are_in_place_when_the_os_connects_that_many_while_using_none_of_them() {
+        let shown = [display("Microsoft Hyper-V Video")];
+
+        assert_eq!(virtual_monitors_in_place(&shown, 2, || Ok(2)), Ok(()));
+    }
+
+    #[test]
+    fn the_virtual_monitors_are_not_in_place_while_the_os_uses_none_of_them_and_connects_fewer() {
+        let shown = [display("Microsoft Hyper-V Video")];
+
+        assert_eq!(
+            virtual_monitors_in_place(&shown, 2, || Ok(1)),
+            Err("the OS shows 0 of 2 virtual monitors and connects 1".into())
+        );
     }
 
     #[test]
@@ -922,7 +970,7 @@ mod tests {
         ];
 
         assert_eq!(
-            virtual_monitors_in_place(&shown, 3),
+            virtual_monitors_in_place(&shown, 3, || Ok(3)),
             Err("the OS shows 1 of 3 virtual monitors".into())
         );
     }
