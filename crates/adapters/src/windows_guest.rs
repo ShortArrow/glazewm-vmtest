@@ -92,7 +92,8 @@ const VIRTUAL_DISPLAY_DRIVER: &str = "Virtual Display Driver";
 /// How long the guest OS may take to show the virtual monitors the driver was asked for.
 const VIRTUAL_MONITORS_LIMIT: Duration = Duration::from_secs(30);
 
-/// How long one connect, read, or write to the guest daemon may take.
+/// How long one connect or write to the guest daemon may take, and how long its answer may take beyond the wait
+/// the request is designed to have.
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The longest IPC limit whose timed-out answer still reaches the runner within `DAEMON_TIMEOUT`.
@@ -227,7 +228,9 @@ impl<H> WindowsGuest<H> {
                     .map_err(|error| error.to_string())?,
             ),
         };
-        let response = daemon.request(request).map_err(|error| error.to_string());
+        let response = daemon
+            .request_within(request, DAEMON_TIMEOUT + request.designed_wait())
+            .map_err(|error| error.to_string());
         if response.is_err() {
             self.daemon = None;
         }

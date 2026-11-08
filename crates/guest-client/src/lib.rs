@@ -70,6 +70,16 @@ impl GuestDaemonClient<TcpStream> {
         stream.set_write_timeout(Some(timeout))?;
         Ok(Self::new(stream))
     }
+
+    /// Sends one request and waits up to `timeout` for its response; later reads keep that timeout.
+    pub fn request_within(
+        &mut self,
+        request: &Request,
+        timeout: Duration,
+    ) -> Result<Response, ClientError> {
+        self.reader.get_ref().set_read_timeout(Some(timeout))?;
+        self.request(request)
+    }
 }
 
 #[cfg(test)]
@@ -105,6 +115,32 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn waits_for_an_answer_longer_than_the_connection_timeout_when_asked_to() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let daemon = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            stream
+                .write_all(
+                    b"{\"type\":\"pong\"}
+",
+                )
+                .unwrap();
+        });
+        let mut client = GuestDaemonClient::connect(address, Duration::from_millis(100)).unwrap();
+
+        let response = client.request_within(&Request::Ping, Duration::from_secs(2));
+
+        daemon.join().unwrap();
+        assert_eq!(response.unwrap(), Response::Pong);
     }
 
     #[test]

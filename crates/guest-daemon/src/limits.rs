@@ -7,6 +7,7 @@
 use std::time::Duration;
 
 use serde::Deserialize;
+use vmtest_protocol::TEST_WINDOW_CONNECT_LIMIT;
 
 use crate::test_windows::Batch;
 
@@ -25,7 +26,7 @@ impl Default for Limits {
         Self {
             max_test_windows_per_request: 500,
             max_test_window_span_ms: 60_000,
-            test_window_connect_limit_ms: 3_000,
+            test_window_connect_limit_ms: TEST_WINDOW_CONNECT_LIMIT.as_millis() as u64,
         }
     }
 }

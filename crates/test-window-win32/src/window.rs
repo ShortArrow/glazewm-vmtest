@@ -6,6 +6,8 @@ use std::ffi::c_void;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
+use vmtest_protocol::TEST_WINDOW_FOREGROUND_LIMIT;
+
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -80,11 +82,8 @@ impl Win32Windows {
     }
 }
 
-/// How long a new window may take to become the foreground window before `open` returns anyway.
-const FOREGROUND_LIMIT: Duration = Duration::from_secs(2);
-
 /// Opens a normal top-level window titled `vmtest test window <id>` and returns its handle once it exists,
-/// and, if `how` says so, once it has become the foreground window or `FOREGROUND_LIMIT` has passed.
+/// and, if `how` says so, once it has become the foreground window or `TEST_WINDOW_FOREGROUND_LIMIT` has passed.
 ///
 /// Waiting for the foreground makes windows opened one after another land in the same places on every run:
 /// a window manager places a new window beside the focused one. The window gets a thread of its own, so
@@ -134,7 +133,8 @@ fn end_after(window: HWND, lifetime: Duration) {
 fn wait_for_foreground(handle: i64) {
     let start = Instant::now();
     // SAFETY: `GetForegroundWindow` has no preconditions.
-    while unsafe { GetForegroundWindow() }.0 as i64 != handle && start.elapsed() < FOREGROUND_LIMIT
+    while unsafe { GetForegroundWindow() }.0 as i64 != handle
+        && start.elapsed() < TEST_WINDOW_FOREGROUND_LIMIT
     {
         std::thread::sleep(Duration::from_millis(20));
     }

@@ -1,7 +1,16 @@
 //! Messages between the runner and the guest daemon, and between the guest daemon and the test-window
 //! applications: JSON, one object per line.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+
+/// How long a test-window application may take to connect to the guest daemon after it is started, unless the
+/// daemon's limits say otherwise.
+pub const TEST_WINDOW_CONNECT_LIMIT: Duration = Duration::from_secs(3);
+
+/// How long a new test window may take to become the foreground window before it is reported opened anyway.
+pub const TEST_WINDOW_FOREGROUND_LIMIT: Duration = Duration::from_secs(2);
 
 /// What the runner asks the guest daemon for.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,6 +93,27 @@ pub enum Request {
     },
     /// Asks which window is the foreground window.
     ForegroundWindow,
+}
+
+impl Request {
+    /// How long the guest daemon may spend on this request by design, on top of the time any answer takes.
+    ///
+    /// Opening test windows may start the test-window application first; the guest daemon is assumed to keep
+    /// `TEST_WINDOW_CONNECT_LIMIT` for it.
+    pub fn designed_wait(&self) -> Duration {
+        let milliseconds = |ms: &u64| Duration::from_millis(*ms);
+        match self {
+            Self::OpenTestWindows {
+                count, within_ms, ..
+            } => {
+                TEST_WINDOW_CONNECT_LIMIT
+                    + within_ms
+                        .as_ref()
+                        .map_or(TEST_WINDOW_FOREGROUND_LIMIT * *count, milliseconds)
+            }
+            _ => Duration::ZERO,
+        }
+    }
 }
 
 /// The display modes Win+P offers.
@@ -458,6 +488,34 @@ mod tests {
         let decoded: Response = decode_line(&encode_line(&response)).unwrap();
 
         assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn allows_test_windows_opened_one_by_one_to_start_the_application_and_wait_for_each_foreground()
+    {
+        let request = Request::OpenTestWindows {
+            count: 2,
+            within_ms: None,
+            lifetime_ms: None,
+        };
+
+        assert_eq!(request.designed_wait(), Duration::from_secs(3 + 2 * 2));
+    }
+
+    #[test]
+    fn allows_test_windows_opened_within_a_span_to_start_the_application_and_take_the_span() {
+        let request = Request::OpenTestWindows {
+            count: 20,
+            within_ms: Some(500),
+            lifetime_ms: Some(0),
+        };
+
+        assert_eq!(request.designed_wait(), Duration::from_millis(3_000 + 500));
+    }
+
+    #[test]
+    fn allows_a_topology_request_no_designed_wait() {
+        assert_eq!(Request::Topology.designed_wait(), Duration::ZERO);
     }
 
     #[test]
