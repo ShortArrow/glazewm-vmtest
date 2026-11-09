@@ -683,3 +683,47 @@ fn every_monitor_displays_a_workspace_when_monitors_flap_around_projection_switc
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed; 7]);
 }
+
+/// The quiet sample configuration with as many workspaces as the guest has monitors with two virtual ones, so that
+/// each monitor displays one and no workspace configuration is left to activate.
+fn no_spare_workspace_config() -> String {
+    let workspaces: String = ["1", "2", "3"]
+        .into_iter()
+        .map(|name| {
+            format!(
+                "  - name: '{name}'
+"
+            )
+        })
+        .collect();
+    quiet_config_with_workspaces(&workspaces)
+}
+
+/// The user moves the only workspace of a monitor to its neighbour while every configured workspace is displayed,
+/// so no workspace is left for the monitor the workspace left.
+#[test]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
+fn every_monitor_displays_a_workspace_after_moving_its_only_workspace_away_with_none_spare() {
+    let scenario = Scenario {
+        name: "move a monitor's only workspace away with no workspace spare".into(),
+        virtual_monitors: 2,
+        steps: vec![
+            Step::PressShortcut("alt+shift+f".into()),
+            Step::PressShortcut("alt+shift+a".into()),
+        ],
+        ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
+    };
+    let mut guest = guest(
+        "glazewm-config-no-spare-workspace.yaml",
+        &no_spare_workspace_config(),
+    );
+
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+
+    for outcome in &outcomes {
+        eprintln!("{:?}\n{:#?}", outcome.verdict, outcome.observation);
+    }
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    assert_eq!(verdicts, vec![StepVerdict::Passed; 3]);
+}
