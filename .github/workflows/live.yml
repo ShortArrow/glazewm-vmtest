@@ -51,7 +51,7 @@ jobs:
             commit: 5709ad0a3c7c386bbc3e38166a865ffc12937515
           - sut: all-fixes
             repository: ShortArrow/glazewm
-            commit: 4e80f1637466c357fc340d69995aa82883cb4030
+            commit: 8a74577a06b1ae49cfabdf2a06e8778e74544a39
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -123,7 +123,7 @@ jobs:
             zebar-commit: 5f90d341867122175cb4a57af594a44752885056
           - sut: all-fixes
             repository: ShortArrow/glazewm
-            commit: 4e80f1637466c357fc340d69995aa82883cb4030
+            commit: 8a74577a06b1ae49cfabdf2a06e8778e74544a39
             zebar-repository: ShortArrow/zebar
             zebar-commit: d44213c02b9502cb0162ee61ad6d3eac8395743f
     env:
