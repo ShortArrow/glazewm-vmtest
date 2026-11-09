@@ -727,3 +727,45 @@ fn every_monitor_displays_a_workspace_after_moving_its_only_workspace_away_with_
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed; 3]);
 }
+
+/// Each monitor displays one workspace with a window in it, so no workspace is left over, and Win+P then uses the PC
+/// screen alone, which moves every workspace to it, until the user switches back to extend.
+///
+/// A workspace with a window in it outlives the monitor it was on, so the monitors that return find no workspace
+/// configuration left to activate.
+#[test]
+#[ignore = "needs a guest of docs/GUEST-IMAGE.md and prebuilt binaries"]
+fn every_monitor_displays_a_workspace_when_monitors_return_to_workspaces_that_kept_their_windows() {
+    let open_a_window_in = |workspace: &str| {
+        [
+            Step::PressShortcut(format!("alt+{workspace}")),
+            Step::OpenTestWindows(TestWindowBatch::persistent(1)),
+        ]
+    };
+    let scenario = Scenario {
+        name: "monitors return to workspaces that kept their windows".into(),
+        virtual_monitors: 2,
+        steps: ["1", "2", "3"]
+            .into_iter()
+            .flat_map(open_a_window_in)
+            .chain([
+                Step::SwitchProjection(Projection::PcScreenOnly),
+                Step::SwitchProjection(Projection::Extend),
+            ])
+            .collect(),
+        ipc_limit: DEFAULT_IPC_LIMIT,
+        allowed_dialogs: vec![],
+    };
+    let mut guest = guest(
+        "glazewm-config-no-spare-workspace.yaml",
+        &no_spare_workspace_config(),
+    );
+
+    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+
+    for outcome in &outcomes {
+        eprintln!("{:?}\n{:#?}", outcome.verdict, outcome.observation);
+    }
+    let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
+    assert_eq!(verdicts, vec![StepVerdict::Passed; 9]);
+}

@@ -7,6 +7,9 @@ fails every_monitor_gets_a_workspace_back_when_every_workspace_is_kept_alive
 # Moving a monitor's only workspace away with no workspace config left opens a "Non-fatal error" dialog that stops
 # glazewm answering IPC.
 fails every_monitor_displays_a_workspace_after_moving_its_only_workspace_away_with_none_spare
+# Monitors that return to workspaces that kept their windows find no workspace config left, and a "Non-fatal error"
+# dialog stops glazewm answering IPC.
+fails every_monitor_displays_a_workspace_when_monitors_return_to_workspaces_that_kept_their_windows
 # The OS minimizes a tiled window when the monitor count changes in some runs, and glazewm keeps it minimized,
 # which deviates from the baseline.
 varies tiled_test_windows_stay_within_their_working_area_across_monitor_count_changes
