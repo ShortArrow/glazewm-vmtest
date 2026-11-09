@@ -7,7 +7,7 @@ use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use vmtest_protocol::{AppCommand, AppReply, decode_line, encode_line};
+use vmtest_protocol::{AppCommand, AppReply, TEST_WINDOW_ANSWER_LIMIT, decode_line, encode_line};
 
 use crate::limits::Limits;
 
@@ -141,7 +141,10 @@ impl<R: BufRead, W: Write> TestWindowApp<R, W> {
             wait_for_foreground: batch.within.is_none(),
             lifetime_ms: batch.lifetime_ms,
         };
-        match self.command(&command)? {
+        let reply = self.command(&command).map_err(|error| {
+            format!("the test-window application did not answer opening window {id}: {error}")
+        })?;
+        match reply {
             AppReply::Opened { id: opened, handle } if opened == id => Ok(handle),
             AppReply::Error { message } => Err(format!(
                 "the test-window application could not open window {id}: {message}"
@@ -224,7 +227,8 @@ impl LaunchedApp {
         action(app.as_mut().ok_or("no test window has been opened")?)
     }
 
-    /// Starts the application with the address of a fresh loopback listener and waits for it to connect.
+    /// Starts the application with the address of a fresh loopback listener and waits for it to connect; each
+    /// later answer may take up to `TEST_WINDOW_ANSWER_LIMIT`.
     fn start(&self) -> Result<TestWindowApp<BufReader<TcpStream>, TcpStream>, String> {
         let cannot_start =
             |error: std::io::Error| format!("cannot start the test-window application: {error}");
@@ -252,6 +256,9 @@ impl LaunchedApp {
             }
         };
         stream.set_nonblocking(false).map_err(cannot_start)?;
+        stream
+            .set_read_timeout(Some(TEST_WINDOW_ANSWER_LIMIT))
+            .map_err(cannot_start)?;
         let reader = stream.try_clone().map_err(cannot_start)?;
         Ok(TestWindowApp::new(BufReader::new(reader), stream))
     }
@@ -478,6 +485,31 @@ mod tests {
 
         assert!(app.open(&Batch::one_by_one(u32::MAX)).is_err());
         assert_eq!(commands(app.writer()), [open_command(0)]);
+    }
+
+    /// Answers with `replies`, then fails every read as a read timeout does.
+    struct StallingAfter(std::io::Cursor<Vec<u8>>);
+
+    impl std::io::Read for StallingAfter {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            match self.0.read(buf)? {
+                0 => Err(std::io::ErrorKind::TimedOut.into()),
+                read => Ok(read),
+            }
+        }
+    }
+
+    #[test]
+    fn names_the_window_whose_opening_the_application_did_not_answer() {
+        let stalling = StallingAfter(replies(&[AppReply::Opened { id: 0, handle: 10 }]));
+        let mut app = TestWindowApp::new(BufReader::new(stalling), Vec::new());
+
+        let error = app.open(&Batch::one_by_one(2)).unwrap_err();
+
+        assert!(
+            error.starts_with("the test-window application did not answer opening window 1"),
+            "{error}"
+        );
     }
 
     #[test]

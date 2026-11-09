@@ -12,6 +12,10 @@ pub const TEST_WINDOW_CONNECT_LIMIT: Duration = Duration::from_secs(3);
 /// How long a new test window may take to become the foreground window before it is reported opened anyway.
 pub const TEST_WINDOW_FOREGROUND_LIMIT: Duration = Duration::from_secs(2);
 
+/// How long the guest daemon waits for a test-window application to answer one command, opening a window
+/// included.
+pub const TEST_WINDOW_ANSWER_LIMIT: Duration = Duration::from_secs(3);
+
 /// What the runner asks the guest daemon for.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -107,9 +111,8 @@ impl Request {
                 count, within_ms, ..
             } => {
                 TEST_WINDOW_CONNECT_LIMIT
-                    + within_ms
-                        .as_ref()
-                        .map_or(TEST_WINDOW_FOREGROUND_LIMIT * *count, milliseconds)
+                    + within_ms.as_ref().map_or(Duration::ZERO, milliseconds)
+                    + TEST_WINDOW_ANSWER_LIMIT * *count
             }
             _ => Duration::ZERO,
         }
@@ -499,7 +502,7 @@ mod tests {
             lifetime_ms: None,
         };
 
-        assert_eq!(request.designed_wait(), Duration::from_secs(3 + 2 * 2));
+        assert_eq!(request.designed_wait(), Duration::from_secs(3 + 2 * 3));
     }
 
     #[test]
@@ -510,7 +513,10 @@ mod tests {
             lifetime_ms: Some(0),
         };
 
-        assert_eq!(request.designed_wait(), Duration::from_millis(3_000 + 500));
+        assert_eq!(
+            request.designed_wait(),
+            Duration::from_millis(3_000 + 500 + 20 * 3_000)
+        );
     }
 
     #[test]
