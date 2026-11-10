@@ -1,7 +1,7 @@
 //! Runs the SUT programs and the SUT's command-line client as child processes.
 
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread::JoinHandle;
@@ -19,8 +19,8 @@ pub struct ProcessGlazewmCli {
 /// A SUT program the harness deployed into a directory named after it: glazewm with the `config.yaml` there,
 /// and zebar with the `config` directory there. Both have the deployed glazewm first on their `PATH`, where an
 /// installed glazewm would be, so that zebar's first run picks the starter widget that shows glazewm, whether the
-/// daemon starts zebar or glazewm does. Started, it writes its output to `stdout.log` and `stderr.log` there,
-/// with a backtrace if it panics.
+/// daemon starts zebar or glazewm does. Started, its output goes to `stdout.log` and `stderr.log` there, with a
+/// backtrace if it panics, through the daemon, so that the program never waits on the guest's disk to write it.
 pub struct DeployedSut {
     base: PathBuf,
     directory: PathBuf,
@@ -83,13 +83,22 @@ impl DeployedSut {
             File::create(&path)
                 .map_err(|error| format!("cannot create {}: {error}", path.display()))
         };
-        self.command()
+        let stdout_log = log("stdout.log")?;
+        let stderr_log = log("stderr.log")?;
+        let mut child = self
+            .command()
             .stdin(Stdio::null())
-            .stdout(log("stdout.log")?)
-            .stderr(log("stderr.log")?)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
-            .map(drop)
-            .map_err(|error| format!("cannot start {}: {error}", self.executable().display()))
+            .map_err(|error| format!("cannot start {}: {error}", self.executable().display()))?;
+        if let Some(stdout) = child.stdout.take() {
+            relay(stdout, stdout_log);
+        }
+        if let Some(stderr) = child.stderr.take() {
+            relay(stderr, stderr_log);
+        }
+        Ok(())
     }
 }
 
@@ -162,6 +171,111 @@ fn read_to_end(pipe: Option<impl Read + Send + 'static>) -> JoinHandle<String> {
 
 fn joined(reader: JoinHandle<String>) -> String {
     reader.join().unwrap_or_default()
+}
+
+/// Copies everything read from `source` to `sink` on threads of its own, until `source` ends. Reading never
+/// waits on `sink`: what `sink` has not yet taken is held in memory, so a program writing to `source` is not
+/// held up by a slow disk behind `sink`.
+fn relay(mut source: impl Read + Send + 'static, mut sink: impl Write + Send + 'static) {
+    let (chunks, received) = std::sync::mpsc::channel::<Vec<u8>>();
+    std::thread::spawn(move || {
+        let mut buffer = vec![0; 64 * 1024];
+        while let Ok(read @ 1..) = source.read(&mut buffer) {
+            if chunks.send(buffer[..read].to_vec()).is_err() {
+                break;
+            }
+        }
+    });
+    std::thread::spawn(move || {
+        for chunk in received {
+            if sink.write_all(&chunk).and_then(|()| sink.flush()).is_err() {
+                break;
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod relay_tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    /// A sink that takes no bytes until released, then hands each write to the test.
+    struct HeldSink {
+        release: mpsc::Receiver<()>,
+        released: bool,
+        written: mpsc::Sender<Vec<u8>>,
+    }
+
+    impl Write for HeldSink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if !self.released {
+                let _ = self.release.recv();
+                self.released = true;
+            }
+            let _ = self.written.send(buf.to_vec());
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn held_sink() -> (HeldSink, mpsc::Sender<()>, mpsc::Receiver<Vec<u8>>) {
+        let (release_tx, release) = mpsc::channel();
+        let (written, written_rx) = mpsc::channel();
+        let sink = HeldSink {
+            release,
+            released: false,
+            written,
+        };
+        (sink, release_tx, written_rx)
+    }
+
+    const OUTPUT_SIZE: usize = 4 * 1024 * 1024;
+
+    #[test]
+    fn a_program_writes_its_output_without_waiting_for_the_log_file() {
+        let (source, mut program_output) = std::io::pipe().unwrap();
+        let (sink, release, _written) = held_sink();
+        relay(source, sink);
+        let (done_tx, done) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            let _ = program_output.write_all(&vec![b'x'; OUTPUT_SIZE]);
+            let _ = done_tx.send(());
+        });
+
+        let finished = done.recv_timeout(Duration::from_secs(5)).is_ok();
+        let _ = release.send(());
+        assert!(finished, "the program's write waited for the held log file");
+    }
+
+    #[test]
+    fn the_log_file_receives_all_output_in_order_once_it_accepts_writes() {
+        let (source, mut program_output) = std::io::pipe().unwrap();
+        let (sink, release, written) = held_sink();
+        relay(source, sink);
+        let output = (0..OUTPUT_SIZE).map(|i| (i % 251) as u8).collect::<Vec<_>>();
+        let writer = {
+            let output = output.clone();
+            std::thread::spawn(move || program_output.write_all(&output))
+        };
+
+        release.send(()).unwrap();
+        writer.join().unwrap().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut received = Vec::new();
+        while received.len() < output.len() && Instant::now() < deadline {
+            if let Ok(chunk) = written.recv_timeout(Duration::from_millis(100)) {
+                received.extend(chunk);
+            }
+        }
+
+        assert!(received == output, "received {} of {} bytes, or out of order", received.len(), output.len());
+    }
 }
 
 #[cfg(all(test, windows))]
