@@ -184,7 +184,7 @@ fn guest(name: &str, glazewm_config: &str) -> WindowsGuest<Platform> {
                     service: "windows".into(),
                     volume: "glazewm-vmtest-win11-storage".into(),
                     image: "dockurr/windows:6.06".into(),
-                    snapshot: "daemon-task".into(),
+                    snapshot: "no-egress".into(),
                     docker_host,
                 }),
             )

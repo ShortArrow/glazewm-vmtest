@@ -1,6 +1,6 @@
 # Guest image
 
-The Windows guest is a Windows 11 Pro install plus a chain of snapshots. The harness restores the last one: `ssh-key-only` on Hyper-V, `daemon-task` on dockur/windows. The snapshots are not in git; this page is how to rebuild them, on Hyper-V and on dockur/windows.
+The Windows guest is a Windows 11 Pro install plus a chain of snapshots. The harness restores the last one: `ssh-key-only` on Hyper-V, `no-egress` on dockur/windows. The snapshots are not in git; this page is how to rebuild them, on Hyper-V and on dockur/windows.
 
 ## Snapshots
 
@@ -14,6 +14,7 @@ Each snapshot is the one above it plus the listed change.
 | `vcredist` | Microsoft Visual C++ 2015–2022 x64 redistributable |
 | `daemon-task` | Scheduled task `vmtest-guest-daemon` running `C:\vmtest\vmtest-guest-daemon.exe 127.0.0.1:7041` as `fixture`, interactive logon type, `RunLevel Limited`, no trigger. No firewall rule opens TCP 7041; the harness reaches the daemon through an SSH port forward. dockur/windows runs the daemon without the argument, which listens on the same address by default |
 | `rdp` | Hyper-V only. Remote Desktop connections allowed (`fDenyTSConnections=0`) with every rule of the Remote Desktop firewall group left disabled, so TCP 3389 answers only on the guest itself and an RDP client reaches it through an SSH port forward. Scheduled task `vmtest-tscon` running as SYSTEM, no trigger, which moves `fixture`'s session to the console with `tscon` |
+| `no-egress` | dockur/windows only, following `daemon-task`. Every outbound connection blocked by the firewall's default outbound action, set by `guests/hyperv-windows/block-outbound.ps1`, so that no Defender, OneDrive or Windows update starts in the guest while a scenario runs and every run starts from the same state. Inbound connections, the SSH port forwards and the loopback address are not affected |
 | `ssh-key-only` | Hyper-V only. sshd accepts public keys only, set by `guests/dockur-windows/oem/ssh-key-only.ps1`. `setup-ssh.ps1` runs the same script, so on a guest installed from the current answer ISO this snapshot changes nothing |
 
 ## Credentials
@@ -60,4 +61,4 @@ With `VMTEST_DOCKER_HOST=vmtest@<host address>`, the harness runs its docker com
 ### The guest
 
 1. `docker compose up -d` in guests/dockur-windows on the Docker host, and wait until `ssh -p 2222 fixture@127.0.0.1` answers there, or `ssh -J vmtest@<host address> -p 2222 fixture@127.0.0.1` from the runner.
-2. For each row of the table: make the change over SSH, shut the guest down from inside (`shutdown /s /t 0`), and create the snapshot with `qemu-img snapshot -c <name> /storage/data.qcow2` from the `dockurr/windows` image, as the dockur-windows skill describes. The scripts in guests/hyperv-windows make the changes for `vdd` and `vcredist`.
+2. For each row of the table that applies to dockur/windows: make the change over SSH, shut the guest down from inside (`shutdown /s /t 0`), and create the snapshot with `qemu-img snapshot -c <name> /storage/data.qcow2` from the `dockurr/windows` image, as the dockur-windows skill describes. The scripts in guests/hyperv-windows make the changes for `vdd`, `vcredist` and `no-egress`.

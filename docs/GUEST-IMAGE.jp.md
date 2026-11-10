@@ -1,6 +1,6 @@
 # ゲストイメージ
 
-Windowsゲストは、Windows 11 Proのインストールと、それに続くスナップショットの連なりでできている。ハーネスは最後のスナップショットを復元する。Hyper-Vでは`ssh-key-only`、dockur/windowsでは`daemon-task`である。スナップショットはgitにないので、このページにHyper-Vとdockur/windowsそれぞれでの作り直し方を書く。
+Windowsゲストは、Windows 11 Proのインストールと、それに続くスナップショットの連なりでできている。ハーネスは最後のスナップショットを復元する。Hyper-Vでは`ssh-key-only`、dockur/windowsでは`no-egress`である。スナップショットはgitにないので、このページにHyper-Vとdockur/windowsそれぞれでの作り直し方を書く。
 
 ## スナップショット
 
@@ -14,6 +14,7 @@ Windowsゲストは、Windows 11 Proのインストールと、それに続く�
 | `vcredist` | Microsoft Visual C++ 2015〜2022 x64再頒布可能パッケージ |
 | `daemon-task` | `C:\vmtest\vmtest-guest-daemon.exe 127.0.0.1:7041`を`fixture`として、対話ログオン種別、`RunLevel Limited`、トリガーなしで実行するスケジュールタスク`vmtest-guest-daemon`。TCP 7041を開けるファイアウォール規則は作らず、ハーネスはSSHのポート転送でデーモンにつなぐ。dockur/windowsでは引数なしで実行する。デーモンは引数がなければ同じアドレスで待ち受ける |
 | `rdp` | Hyper-Vのみ。リモートデスクトップ接続を許可し（`fDenyTSConnections=0`）、Remote Desktopのファイアウォール規則はすべて無効のままにする。そのためTCP 3389にはゲスト自身からしか届かず、RDPクライアントはSSHのポート転送でつなぐ。SYSTEMとしてトリガーなしで実行するスケジュールタスク`vmtest-tscon`を置く。このタスクは`tscon`で`fixture`のセッションをコンソールに移す |
+| `no-egress` | dockur/windowsのみで、`daemon-task`に続く。`guests/hyperv-windows/block-outbound.ps1`でファイアウォールの既定の外向き動作をBlockにし、外向きの接続をすべて遮断する。シナリオの実行中にDefender、OneDrive、Windowsの更新がゲストで始まらず、毎回同じ状態から始まるようにするためである。内向きの接続、SSHのポート転送、ループバックアドレスは影響を受けない |
 | `ssh-key-only` | Hyper-Vのみ。`guests/dockur-windows/oem/ssh-key-only.ps1`で、sshdが公開鍵でしかログインを受け付けないようにする。`setup-ssh.ps1`も同じスクリプトを実行するので、今の回答ファイルのISOからインストールしたゲストでは、このスナップショットで変わるものはない |
 
 ## 資格情報
@@ -60,4 +61,4 @@ Dockerホストには、ハーネスのHyper-VホストにあるLinuxの仮想�
 ### ゲスト
 
 1. Dockerホストのguests/dockur-windowsで`docker compose up -d`を実行し、そのホストで`ssh -p 2222 fixture@127.0.0.1`が、ランナーからなら`ssh -J vmtest@<ホストのアドレス> -p 2222 fixture@127.0.0.1`が応答するまで待つ。
-2. 表の各行について、SSHで変更を加え、ゲスト内からシャットダウンし（`shutdown /s /t 0`）、`dockurr/windows`イメージの`qemu-img snapshot -c <名前> /storage/data.qcow2`でスナップショットを作る。手順はdockur-windowsスキルのとおり。`vdd`と`vcredist`の変更は、guests/hyperv-windowsのスクリプトで加えられる。
+2. 表のうちdockur/windowsに当てはまる各行について、SSHで変更を加え、ゲスト内からシャットダウンし（`shutdown /s /t 0`）、`dockurr/windows`イメージの`qemu-img snapshot -c <名前> /storage/data.qcow2`でスナップショットを作る。手順はdockur-windowsスキルのとおり。`vdd`、`vcredist`、`no-egress`の変更は、guests/hyperv-windowsのスクリプトで加えられる。
