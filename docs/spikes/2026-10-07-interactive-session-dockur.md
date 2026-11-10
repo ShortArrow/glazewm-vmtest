@@ -3,7 +3,7 @@
 - Date: 2026-10-07
 - Spike: "Interactive session" in docs/ROADMAP.md
 - Guest: `dockurr/windows:6.06`, `VERSION: "11"`, Windows 11 Pro build 26200, 4 cores, 8 GB, qcow2 (guests/dockur-windows/compose.yaml at commit d0d8ae0)
-- Host: Windows 11 Pro, Docker Desktop 28.5.1 (WSL2), AMD Ryzen 9 7950X
+- Host: Windows 11 Pro, Docker Desktop (WSL2)
 
 ## Observations
 

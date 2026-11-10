@@ -3,7 +3,7 @@
 - 日付: 2026-10-07
 - 検証項目: docs/ROADMAP.jp.mdの「対話セッション」
 - ゲスト: `dockurr/windows:6.06`、`VERSION: "11"`、Windows 11 Pro build 26200、4コア、8 GB、qcow2（コミットd0d8ae0のguests/dockur-windows/compose.yaml）
-- ホスト: Windows 11 Pro、Docker Desktop 28.5.1（WSL2）、AMD Ryzen 9 7950X
+- ホスト: Windows 11 Pro、Docker Desktop（WSL2）
 
 ## 観測結果
 
