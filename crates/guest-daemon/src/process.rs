@@ -78,6 +78,22 @@ impl DeployedSut {
 
     /// Starts the program and returns once its process exists, leaving it running.
     pub fn start(&self) -> Result<(), String> {
+        self.spawn().map(|_| ())
+    }
+
+    /// Starts the program, waits for it to exit, and returns once its output is in the log files.
+    pub fn run(&self) -> Result<std::process::ExitStatus, String> {
+        let (mut child, relays) = self.spawn()?;
+        let status = child
+            .wait()
+            .map_err(|error| format!("cannot wait for {}: {error}", self.executable().display()))?;
+        for relay in relays {
+            let _ = relay.join();
+        }
+        Ok(status)
+    }
+
+    fn spawn(&self) -> Result<(Child, Vec<JoinHandle<()>>), String> {
         let log = |name: &str| {
             let path = self.directory.join(name);
             File::create(&path)
@@ -92,13 +108,14 @@ impl DeployedSut {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|error| format!("cannot start {}: {error}", self.executable().display()))?;
+        let mut relays = Vec::new();
         if let Some(stdout) = child.stdout.take() {
-            relay(stdout, stdout_log);
+            relays.push(relay(stdout, stdout_log));
         }
         if let Some(stderr) = child.stderr.take() {
-            relay(stderr, stderr_log);
+            relays.push(relay(stderr, stderr_log));
         }
-        Ok(())
+        Ok((child, relays))
     }
 }
 
@@ -175,8 +192,12 @@ fn joined(reader: JoinHandle<String>) -> String {
 
 /// Copies everything read from `source` to `sink` on threads of its own, until `source` ends. Reading never
 /// waits on `sink`: what `sink` has not yet taken is held in memory, so a program writing to `source` is not
-/// held up by a slow disk behind `sink`.
-fn relay(mut source: impl Read + Send + 'static, mut sink: impl Write + Send + 'static) {
+/// held up by a slow disk behind `sink`. The returned thread ends once `sink` has taken everything `source` gave,
+/// or has failed.
+fn relay(
+    mut source: impl Read + Send + 'static,
+    mut sink: impl Write + Send + 'static,
+) -> JoinHandle<()> {
     let (chunks, received) = std::sync::mpsc::channel::<Vec<u8>>();
     std::thread::spawn(move || {
         let mut buffer = vec![0; 64 * 1024];
@@ -192,7 +213,7 @@ fn relay(mut source: impl Read + Send + 'static, mut sink: impl Write + Send + '
                 break;
             }
         }
-    });
+    })
 }
 
 #[cfg(test)]
@@ -282,6 +303,21 @@ mod relay_tests {
             received.len(),
             output.len()
         );
+    }
+
+    #[test]
+    fn the_log_file_has_all_output_once_the_relay_has_finished() {
+        let (source, mut program_output) = std::io::pipe().unwrap();
+        let (sink, release, written) = held_sink();
+        let finished = relay(source, sink);
+        release.send(()).unwrap();
+
+        program_output.write_all(&[b'x'; 1000]).unwrap();
+        drop(program_output);
+        finished.join().unwrap();
+
+        let received = written.try_iter().flatten().count();
+        assert_eq!(received, 1000);
     }
 }
 

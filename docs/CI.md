@@ -9,12 +9,12 @@ Two GitHub Actions workflows check the harness.
 
 ## The live workflow
 
-The Windows jobs build the guest daemon, the test-window application and the load generator once, and glazewm and zebar once for each of these pairs of commits, with the nightly toolchain the workflow pins:
+The Windows jobs build the guest daemon, the test-window application and the load generator once, and glazewm and zebar once for each of these pairs of commits, with the nightly toolchain the workflow pins. Each pair runs with glazewm started as the user, and `all-fixes` runs a second time with glazewm started elevated, as `sudo glazewm` runs it:
 
 | Pair | glazewm | zebar | Expectations |
 |---|---|---|---|
 | `upstream` | glzr-io/glazewm `5709ad0a`, the commit the baselines are recorded from | glzr-io/zebar `5f90d341` | `ci/live-expectations/upstream.txt` |
-| `all-fixes` | ShortArrow/glazewm `vmtest/all-fixes` at `8a74577a`, upstream with every fix the harness has led to | ShortArrow/zebar `vmtest/all-fixes` at `d44213c0`, likewise | `ci/live-expectations/all-fixes.txt` |
+| `all-fixes` | ShortArrow/glazewm `vmtest/all-fixes` at `8a74577a`, upstream with every fix the harness has led to | ShortArrow/zebar `vmtest/all-fixes` at `d44213c0`, likewise | `ci/live-expectations/all-fixes.txt`, and `ci/live-expectations/all-fixes-administrator.txt` with glazewm elevated |
 
 The live job then runs `ci/run-live.sh` with each expectations file in turn on the runner. The script runs every live scenario on its own, one after another on the one guest. A scenario listed as `fails` has to fail, one listed as `varies` is not run, and every other scenario has to pass. A scenario that reproduces a bug glazewm or zebar still has upstream is listed as `fails` in `upstream.txt` and passes on `all-fixes`, so one run shows the bug and its fix.
 

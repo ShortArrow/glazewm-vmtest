@@ -117,17 +117,29 @@ jobs:
       matrix:
         include:
           - sut: upstream
+            privilege: user
+            expectations: upstream
             repository: glzr-io/glazewm
             commit: 5709ad0a3c7c386bbc3e38166a865ffc12937515
             zebar-repository: glzr-io/zebar
             zebar-commit: 5f90d341867122175cb4a57af594a44752885056
           - sut: all-fixes
+            privilege: user
+            expectations: all-fixes
+            repository: ShortArrow/glazewm
+            commit: 8a74577a06b1ae49cfabdf2a06e8778e74544a39
+            zebar-repository: ShortArrow/zebar
+            zebar-commit: d44213c02b9502cb0162ee61ad6d3eac8395743f
+          - sut: all-fixes
+            privilege: administrator
+            expectations: all-fixes-administrator
             repository: ShortArrow/glazewm
             commit: 8a74577a06b1ae49cfabdf2a06e8778e74544a39
             zebar-repository: ShortArrow/zebar
             zebar-commit: d44213c02b9502cb0162ee61ad6d3eac8395743f
     env:
       VMTEST_PLATFORM: dockur
+      VMTEST_GLAZEWM_PRIVILEGE: ${{ matrix.privilege }}
       RUSTUP_TOOLCHAIN: 1.97.1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -169,7 +181,7 @@ jobs:
         working-directory: glazewm-vmtest
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
-          sh ci/run-live.sh ci/live-expectations/${{ matrix.sut }}.txt
+          sh ci/run-live.sh ci/live-expectations/${{ matrix.expectations }}.txt
       - name: Remove the guest's password and SSH key
         if: always()
         working-directory: glazewm-vmtest/guests/dockur-windows

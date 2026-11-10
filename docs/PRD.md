@@ -64,6 +64,7 @@ The harness replaces that manual work with virtualization-platform operations, s
 | FR-15 | A scenario can record its observations as its baseline; later runs report deviations from the baseline separately from invariant violations | All |
 | FR-16 | Operation sequences can be generated at random from a seed, and a scenario can be repeated for a specified count or duration | UC-12 |
 | FR-17 | A step that does not settle within a time limit is reported as unsettled, not as passed | All |
+| FR-18 | A run starts glazewm either as the user that logs on or elevated as that user, as `sudo glazewm` does; test windows run as the user either way | All |
 
 ## Window kinds
 

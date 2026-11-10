@@ -1,0 +1,2 @@
+# ShortArrow/glazewm vmtest/all-fixes at the commit the live workflow builds, started elevated as `sudo glazewm`
+# starts it. Every scenario passes.

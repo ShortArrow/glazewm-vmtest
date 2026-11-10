@@ -48,8 +48,18 @@ pub struct GuestConfig {
     /// Directory holding glazewm.exe, glazewm-cli.exe and glazewm-watcher.exe.
     pub glazewm_build: PathBuf,
     pub glazewm_config: PathBuf,
+    pub glazewm_privilege: GlazewmPrivilege,
     /// The zebar to deploy and start beside glazewm; `None` deploys no zebar.
     pub zebar: Option<ZebarBuild>,
+}
+
+/// What glazewm runs as. Test windows run as the user either way, and so does the guest daemon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GlazewmPrivilege {
+    /// The user that logs on, unelevated, as the guest daemon is.
+    User,
+    /// The same user elevated, as `sudo glazewm` runs it; zebar, started by glazewm, is elevated too.
+    Administrator,
 }
 
 /// A zebar built from its repository: the executable, with the settings UI built into it, and the repository's
@@ -505,7 +515,18 @@ impl<H> GuestExecutor for WindowsGuest<H> {
             _ => self.config.glazewm_config.clone(),
         };
         self.scp(&[&glazewm_config], "C:/vmtest/glazewm/config.yaml")?;
-        self.start(SutProgram::Glazewm)?;
+        match self.config.glazewm_privilege {
+            GlazewmPrivilege::User => self.start(SutProgram::Glazewm)?,
+            GlazewmPrivilege::Administrator => {
+                let daemon = self
+                    .config
+                    .daemon_executable
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .ok_or("the guest daemon's executable has no file name")?;
+                self.ssh(&administrator_glazewm_command(&self.config.user, &daemon))?;
+            }
+        }
         poll(Duration::from_secs(60), "glazewm to take a query", || {
             self.query_glazewm_monitors(ipc_limit, &[]).map(|_| ())
         })?;
@@ -783,6 +804,19 @@ fn wait_until_forwarding(
 
 /// Sets the count in the driver's settings while its device is disabled, since the driver reads the count only when
 /// it starts, and its own request for a new count restarts it by crashing, which Windows allows only a few times.
+/// Starts the deployed glazewm elevated in `user`'s interactive session, as `sudo glazewm` does on a user's machine,
+/// through the guest daemon's executable `daemon`, which keeps glazewm's output. A task with `RunLevel Highest` is
+/// registered over SSH because SSH runs elevated and the guest daemon does not.
+fn administrator_glazewm_command(user: &str, daemon: &str) -> String {
+    format!(
+        "$a = New-ScheduledTaskAction -Execute 'C:\\vmtest\\{daemon}' \
+         -Argument 'run-sut glazewm' -WorkingDirectory 'C:\\vmtest'; \
+         $p = New-ScheduledTaskPrincipal -UserId '{user}' -LogonType Interactive -RunLevel Highest; \
+         Register-ScheduledTask -TaskName vmtest-glazewm-administrator -Action $a -Principal $p -Force | Out-Null; \
+         Start-ScheduledTask -TaskName vmtest-glazewm-administrator"
+    )
+}
+
 fn virtual_monitor_count_command(count: u32) -> String {
     format!(
         "$d = Get-PnpDevice -FriendlyName '{VIRTUAL_DISPLAY_DRIVER}'; \
@@ -912,6 +946,7 @@ mod tests {
                 daemon_limits: None,
                 glazewm_build: PathBuf::new(),
                 glazewm_config: PathBuf::new(),
+                glazewm_privilege: GlazewmPrivilege::User,
                 zebar: None,
             },
             (),
@@ -993,6 +1028,18 @@ mod tests {
         assert_eq!(
             settable_virtual_monitor_count(0),
             Err("the virtual display driver fails when asked for no monitors; remove the virtual monitors instead".into())
+        );
+    }
+
+    #[test]
+    fn starts_glazewm_as_an_administrator_through_a_scheduled_task_in_the_users_session() {
+        assert_eq!(
+            administrator_glazewm_command("fixture", "vmtest-guest-daemon.exe"),
+            "$a = New-ScheduledTaskAction -Execute 'C:\\vmtest\\vmtest-guest-daemon.exe' \
+             -Argument 'run-sut glazewm' -WorkingDirectory 'C:\\vmtest'; \
+             $p = New-ScheduledTaskPrincipal -UserId 'fixture' -LogonType Interactive -RunLevel Highest; \
+             Register-ScheduledTask -TaskName vmtest-glazewm-administrator -Action $a -Principal $p -Force | Out-Null; \
+             Start-ScheduledTask -TaskName vmtest-glazewm-administrator"
         );
     }
 

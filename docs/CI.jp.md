@@ -9,12 +9,12 @@
 
 ## liveのワークフロー
 
-Windowsのジョブは、ゲストデーモン、テストウィンドウのアプリケーション、負荷生成プログラムを1回ビルドし、glazewmとzebarを次のコミットの組ごとに、ワークフローが固定したnightlyのツールチェーンでビルドする。
+Windowsのジョブは、ゲストデーモン、テストウィンドウのアプリケーション、負荷生成プログラムを1回ビルドし、glazewmとzebarを次のコミットの組ごとに、ワークフローが固定したnightlyのツールチェーンでビルドする。どの組もglazewmをユーザーとして起動して実行し、`all-fixes`は、`sudo glazewm`と同じくglazewmを昇格して起動してもう1回実行する。
 
 | 組 | glazewm | zebar | 期待する結果 |
 |---|---|---|---|
 | `upstream` | glzr-io/glazewmの`5709ad0a`。ベースラインを記録したコミット | glzr-io/zebarの`5f90d341` | `ci/live-expectations/upstream.txt` |
-| `all-fixes` | ShortArrow/glazewmの`vmtest/all-fixes`の`8a74577a`。upstreamに、ハーネスで見つけた修正をすべて加えたもの | ShortArrow/zebarの`vmtest/all-fixes`の`d44213c0`。glazewmと同じく修正をすべて加えたもの | `ci/live-expectations/all-fixes.txt` |
+| `all-fixes` | ShortArrow/glazewmの`vmtest/all-fixes`の`8a74577a`。upstreamに、ハーネスで見つけた修正をすべて加えたもの | ShortArrow/zebarの`vmtest/all-fixes`の`d44213c0`。glazewmと同じく修正をすべて加えたもの | `ci/live-expectations/all-fixes.txt`。glazewmを昇格して起動するときは`ci/live-expectations/all-fixes-administrator.txt` |
 
 続いてliveのジョブが、ランナーでそれぞれの期待結果のファイルを渡して`ci/run-live.sh`を順に実行する。スクリプトは、liveシナリオを1本ずつ、1つのゲストで順番に実行する。`fails`と書いたシナリオは失敗しなければならず、`varies`と書いたシナリオは実行せず、ほかのシナリオは成功しなければならない。upstreamのglazewmかzebarにまだ残っているバグを再現するシナリオは、`upstream.txt`に`fails`と書き、`all-fixes`では成功する。こうして1回の実行で、バグとその修正の両方を示す。
 

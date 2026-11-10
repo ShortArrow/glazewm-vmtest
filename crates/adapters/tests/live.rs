@@ -11,6 +11,9 @@
 //! is the `ssh` destination of the Docker host the container runs on, which the harness also reaches the guest
 //! through; when unset, the container runs on the Docker daemon the `docker` command reaches by default.
 //!
+//! `VMTEST_GLAZEWM_PRIVILEGE` picks what glazewm runs as: `user` (the default), unelevated as the guest daemon and
+//! the test windows are, or `administrator`, elevated as `sudo glazewm` runs it.
+//!
 //! A scenario with a baseline compares its observations with baselines/<name>.json. With
 //! `VMTEST_RECORD=1` it records that file instead, from the glazewm commit named by `VMTEST_SUT_COMMIT`.
 
@@ -23,7 +26,7 @@ use vmtest_adapters::glazewm::config_without_startup_commands;
 use vmtest_adapters::hyperv::{HyperVCheckpoint, HyperVHost};
 use vmtest_adapters::powershell::encoded_command;
 use vmtest_adapters::windows_guest::{
-    GuestConfig, SystemClock, WindowsGuest, ZebarBuild, ZebarLaunch,
+    GlazewmPrivilege, GuestConfig, SystemClock, WindowsGuest, ZebarBuild, ZebarLaunch,
 };
 use vmtest_domain::baseline::{Baseline, Deviation};
 use vmtest_domain::scenario::{
@@ -154,6 +157,7 @@ fn guest(name: &str, glazewm_config: &str) -> WindowsGuest<Platform> {
             .map(PathBuf::from)
             .unwrap_or_else(|| repository.join("target/sut/glazewm/release")),
         glazewm_config: glazewm_config_path,
+        glazewm_privilege: glazewm_privilege(),
         zebar: None,
     };
     match std::env::var("VMTEST_PLATFORM").as_deref() {
@@ -190,6 +194,15 @@ fn guest(name: &str, glazewm_config: &str) -> WindowsGuest<Platform> {
             )
         }
         Ok(other) => panic!("VMTEST_PLATFORM is hyperv or dockur, not {other}"),
+    }
+}
+
+/// What glazewm runs as, chosen by `VMTEST_GLAZEWM_PRIVILEGE`.
+fn glazewm_privilege() -> GlazewmPrivilege {
+    match std::env::var("VMTEST_GLAZEWM_PRIVILEGE").as_deref() {
+        Ok("user") | Err(_) => GlazewmPrivilege::User,
+        Ok("administrator") => GlazewmPrivilege::Administrator,
+        Ok(other) => panic!("VMTEST_GLAZEWM_PRIVILEGE is user or administrator, not {other}"),
     }
 }
 

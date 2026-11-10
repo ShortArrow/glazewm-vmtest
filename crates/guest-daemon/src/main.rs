@@ -1,4 +1,5 @@
-//! Entry point of the guest daemon: `vmtest-guest-daemon [listen-address]`, default `127.0.0.1:7041`.
+//! Entry point of the guest daemon: `vmtest-guest-daemon [listen-address]`, default `127.0.0.1:7041`, or
+//! `vmtest-guest-daemon run-sut <glazewm|zebar>`, which runs one deployed SUT program until it exits.
 //!
 //! The SUT is expected beside the daemon's executable: glazewm at `glazewm\glazewm.exe`, its configuration at
 //! `glazewm\config.yaml` and its client at `glazewm\glazewm-cli.exe`, and zebar at `zebar\zebar.exe` with its
@@ -23,8 +24,8 @@ fn main() -> std::io::Result<()> {
     use vmtest_guest_daemon::test_windows::LaunchedApp;
     use vmtest_guest_daemon::win32::{self, Win32Topology};
     use vmtest_guest_daemon::{
-        CliOutcome, DisplayPower, DisplayProjection, GlazewmCli, LoadHost, SutProcesses,
-        TestWindowHost, TopologySource, UserInput, listen_address, serve,
+        CliOutcome, DisplayPower, DisplayProjection, GlazewmCli, Invocation, LoadHost,
+        SutProcesses, TestWindowHost, TopologySource, UserInput, invocation, serve,
     };
     use vmtest_protocol::{
         DisplayDto, LoadKindDto, PresenceDto, ProjectionDto, SutProgram, TestWindowDto,
@@ -159,7 +160,23 @@ fn main() -> std::io::Result<()> {
             let _ = writeln!(file, "{message}");
         }
     });
-    let address = listen_address(std::env::args().nth(1));
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    let address = match invocation(&args) {
+        Ok(Invocation::Serve(address)) => address,
+        Ok(Invocation::RunSut(program)) => {
+            let status = DeployedSut::new(&directory, program)
+                .run()
+                .map_err(|error| {
+                    log(error.clone());
+                    std::io::Error::other(error)
+                })?;
+            std::process::exit(status.code().unwrap_or(1));
+        }
+        Err(error) => {
+            log(error.clone());
+            return Err(std::io::Error::other(error));
+        }
+    };
     if let Err(error) = win32::make_dpi_aware() {
         log(error);
     }

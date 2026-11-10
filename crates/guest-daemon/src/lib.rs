@@ -226,6 +226,35 @@ pub fn listen_address(given: Option<String>) -> String {
     given.unwrap_or_else(|| "127.0.0.1:7041".into())
 }
 
+/// What one run of the daemon's executable does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Invocation {
+    /// Serves requests on the address.
+    Serve(String),
+    /// Runs the SUT program the harness deployed and keeps its output, as `StartSut` does, then exits when the
+    /// program does. The runner starts it this way, through a scheduled task, to run the program at a privilege
+    /// the serving daemon does not have.
+    RunSut(SutProgram),
+}
+
+/// Reads `args`, the arguments after the executable's name: `run-sut glazewm` or `run-sut zebar`, or else at most a
+/// listen address.
+pub fn invocation(args: &[String]) -> Result<Invocation, String> {
+    match args {
+        [command, program] if command == "run-sut" => match program.as_str() {
+            "glazewm" => Ok(Invocation::RunSut(SutProgram::Glazewm)),
+            "zebar" => Ok(Invocation::RunSut(SutProgram::Zebar)),
+            other => Err(format!("run-sut runs glazewm or zebar, not {other}")),
+        },
+        [command, ..] if command == "run-sut" => {
+            Err("run-sut takes one program: glazewm or zebar".into())
+        }
+        [] => Ok(Invocation::Serve(listen_address(None))),
+        [address] => Ok(Invocation::Serve(listen_address(Some(address.clone())))),
+        _ => Err(format!("unexpected arguments: {}", args.join(" "))),
+    }
+}
+
 /// Answers every request line read from `reader` with one response line on `writer`, until end of input.
 ///
 /// A line that is not a valid request is answered with `Response::Error`, and serving continues.
@@ -269,6 +298,44 @@ mod tests {
     #[test]
     fn listens_on_the_given_address() {
         assert_eq!(listen_address(Some("0.0.0.0:7041".into())), "0.0.0.0:7041");
+    }
+
+    fn args(words: &[&str]) -> Vec<String> {
+        words.iter().map(|word| word.to_string()).collect()
+    }
+
+    #[test]
+    fn serves_on_the_guests_loopback_without_arguments() {
+        assert_eq!(
+            invocation(&args(&[])),
+            Ok(Invocation::Serve("127.0.0.1:7041".into()))
+        );
+    }
+
+    #[test]
+    fn serves_on_an_address_given_as_the_only_argument() {
+        assert_eq!(
+            invocation(&args(&["0.0.0.0:7041"])),
+            Ok(Invocation::Serve("0.0.0.0:7041".into()))
+        );
+    }
+
+    #[test]
+    fn runs_a_deployed_sut_program_when_asked_to() {
+        assert_eq!(
+            invocation(&args(&["run-sut", "glazewm"])),
+            Ok(Invocation::RunSut(SutProgram::Glazewm))
+        );
+        assert_eq!(
+            invocation(&args(&["run-sut", "zebar"])),
+            Ok(Invocation::RunSut(SutProgram::Zebar))
+        );
+    }
+
+    #[test]
+    fn refuses_to_run_a_program_the_harness_does_not_deploy() {
+        assert!(invocation(&args(&["run-sut", "notepad"])).is_err());
+        assert!(invocation(&args(&["run-sut"])).is_err());
     }
 
     impl TopologySource for FixedWindows {
