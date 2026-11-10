@@ -174,7 +174,7 @@ fn guest(name: &str, glazewm_config: &str) -> WindowsGuest<Platform> {
                 host: std::env::var("VMTEST_HYPERV_HOST")
                     .map_or(HyperVHost::Local, HyperVHost::Ssh),
                 vm_name: "vmtest-win11".into(),
-                checkpoint: "ssh-key-only".into(),
+                checkpoint: "no-egress".into(),
             }),
         ),
         Ok("dockur") => {
