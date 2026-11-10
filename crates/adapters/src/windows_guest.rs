@@ -2,7 +2,7 @@
 
 use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -151,6 +151,29 @@ impl<H> WindowsGuest<H> {
             .arg("-r")
             .args(sources.iter().map(|source| source.as_os_str()))
             .arg(format!("{}:{destination}", self.ssh_destination())))
+    }
+
+    fn scp_from_guest(&self, source: &str, destination: &Path) -> Result<(), String> {
+        run(Command::new("scp")
+            .args(self.ssh_options())
+            .arg("-P")
+            .arg(self.config.ssh_port.to_string())
+            .arg("-r")
+            .arg(format!("{}:{source}", self.ssh_destination()))
+            .arg(destination))
+    }
+
+    /// Copies the logs glazewm, zebar and the guest daemon have written in the guest so far into the directory `to`,
+    /// which is created, as `glazewm-stdout.log`, `glazewm-errors.log`, `zebar-stderr.log`, `guest-daemon.log` and
+    /// the like; a log the run did not write is not there.
+    pub fn keep_logs(&self, to: &Path) -> Result<(), String> {
+        self.ssh(&gather_logs_command())?;
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+        }
+        let _ = std::fs::remove_dir_all(to);
+        self.scp_from_guest(GATHERED_LOGS, to)
     }
 
     /// The ssh command that forwards `daemon_address` to the guest daemon, if the daemon is reached that way.
@@ -804,6 +827,27 @@ fn wait_until_forwarding(
 
 /// Sets the count in the driver's settings while its device is disabled, since the driver reads the count only when
 /// it starts, and its own request for a new count restarts it by crashing, which Windows allows only a few times.
+/// Where `gather_logs_command` gathers the logs in the guest.
+const GATHERED_LOGS: &str = "C:/vmtest/logs";
+
+/// Copies into one folder in the guest, `GATHERED_LOGS`, every log that glazewm, zebar and the guest daemon wrote
+/// there, each named by the program and the stream it came from. A log the run did not write is left out.
+fn gather_logs_command() -> String {
+    "$to = 'C:\\vmtest\\logs'; \
+     Remove-Item -Recurse -Force $to -ErrorAction SilentlyContinue; \
+     New-Item -ItemType Directory -Force $to | Out-Null; \
+     @{ 'glazewm-stdout.log' = 'C:\\vmtest\\glazewm\\stdout.log'; \
+     'glazewm-stderr.log' = 'C:\\vmtest\\glazewm\\stderr.log'; \
+     'glazewm-errors.log' = \"$env:USERPROFILE\\.glzr\\glazewm\\errors.log\"; \
+     'zebar-stdout.log' = 'C:\\vmtest\\zebar\\stdout.log'; \
+     'zebar-stderr.log' = 'C:\\vmtest\\zebar\\stderr.log'; \
+     'zebar-errors.log' = 'C:\\vmtest\\zebar\\config\\errors.log'; \
+     'guest-daemon.log' = 'C:\\vmtest\\guest-daemon.log' }.GetEnumerator() | \
+     Where-Object { Test-Path $_.Value } | \
+     ForEach-Object { Copy-Item $_.Value (Join-Path $to $_.Key) }"
+        .into()
+}
+
 /// Starts the deployed glazewm elevated in `user`'s interactive session, as `sudo glazewm` does on a user's machine,
 /// through the guest daemon's executable `daemon`, which keeps glazewm's output. A task with `RunLevel Highest` is
 /// registered over SSH because SSH runs elevated and the guest daemon does not.
@@ -1028,6 +1072,26 @@ mod tests {
         assert_eq!(
             settable_virtual_monitor_count(0),
             Err("the virtual display driver fails when asked for no monitors; remove the virtual monitors instead".into())
+        );
+    }
+
+    #[test]
+    fn gathers_every_log_the_sut_and_the_daemon_wrote_into_one_folder_named_by_where_each_came_from()
+     {
+        assert_eq!(
+            gather_logs_command(),
+            "$to = 'C:\\vmtest\\logs'; \
+             Remove-Item -Recurse -Force $to -ErrorAction SilentlyContinue; \
+             New-Item -ItemType Directory -Force $to | Out-Null; \
+             @{ 'glazewm-stdout.log' = 'C:\\vmtest\\glazewm\\stdout.log'; \
+             'glazewm-stderr.log' = 'C:\\vmtest\\glazewm\\stderr.log'; \
+             'glazewm-errors.log' = \"$env:USERPROFILE\\.glzr\\glazewm\\errors.log\"; \
+             'zebar-stdout.log' = 'C:\\vmtest\\zebar\\stdout.log'; \
+             'zebar-stderr.log' = 'C:\\vmtest\\zebar\\stderr.log'; \
+             'zebar-errors.log' = 'C:\\vmtest\\zebar\\config\\errors.log'; \
+             'guest-daemon.log' = 'C:\\vmtest\\guest-daemon.log' }.GetEnumerator() | \
+             Where-Object { Test-Path $_.Value } | \
+             ForEach-Object { Copy-Item $_.Value (Join-Path $to $_.Key) }"
         );
     }
 

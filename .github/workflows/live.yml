@@ -182,6 +182,12 @@ jobs:
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
           sh ci/run-live.sh ci/live-expectations/${{ matrix.expectations }}.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: logs-${{ matrix.expectations }}
+          path: glazewm-vmtest/target/vmtest/logs
+          if-no-files-found: warn
       - name: Remove the guest's password and SSH key
         if: always()
         working-directory: glazewm-vmtest/guests/dockur-windows

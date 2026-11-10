@@ -14,6 +14,9 @@
 //! `VMTEST_GLAZEWM_PRIVILEGE` picks what glazewm runs as: `user` (the default), unelevated as the guest daemon and
 //! the test windows are, or `administrator`, elevated as `sudo glazewm` runs it.
 //!
+//! After each scenario, the logs glazewm, zebar and the guest daemon wrote in the guest are copied to
+//! target/vmtest/logs/<test name>.
+//!
 //! A scenario with a baseline compares its observations with baselines/<name>.json. With
 //! `VMTEST_RECORD=1` it records that file instead, from the glazewm commit named by `VMTEST_SUT_COMMIT`.
 
@@ -30,8 +33,8 @@ use vmtest_adapters::windows_guest::{
 };
 use vmtest_domain::baseline::{Baseline, Deviation};
 use vmtest_domain::scenario::{
-    DEFAULT_IPC_LIMIT, Load, LoadKind, Observation, Projection, Scenario, Step, StepVerdict,
-    TestWindowBatch, WindowLifetime,
+    DEFAULT_IPC_LIMIT, Load, LoadKind, Observation, Projection, Scenario, Step, StepOutcome,
+    StepVerdict, TestWindowBatch, WindowLifetime,
 };
 use vmtest_runner::{Hypervisor, SettleSettings, run};
 
@@ -221,6 +224,21 @@ fn zebar() -> ZebarBuild {
     }
 }
 
+/// Runs `scenario`, then keeps the logs glazewm, zebar and the guest daemon wrote in target/vmtest/logs, in a
+/// directory named after the test, whether the run completed or not.
+fn run_keeping_logs(scenario: &Scenario, guest: &mut WindowsGuest<Platform>) -> Vec<StepOutcome> {
+    let outcomes = run(scenario, guest, &mut SystemClock::start(), SETTLE);
+    let test = std::thread::current()
+        .name()
+        .unwrap_or("scenario")
+        .to_string();
+    let logs = repository().join("target/vmtest/logs").join(test);
+    if let Err(error) = guest.keep_logs(&logs) {
+        eprintln!("the logs were not kept: {error}");
+    }
+    outcomes.unwrap()
+}
+
 const SETTLE: SettleSettings = SettleSettings {
     window: Duration::from_secs(5),
     limit: Duration::from_secs(60),
@@ -244,7 +262,7 @@ fn glazewm_tracks_virtual_monitor_count_changes() {
     };
     let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     let observations: Vec<_> = outcomes.iter().map(|o| o.observation.clone()).collect();
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
@@ -274,7 +292,7 @@ fn tiled_test_windows_stay_within_their_working_area_across_monitor_count_change
     };
     let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     let observations: Vec<_> = outcomes.iter().map(|o| o.observation.clone()).collect();
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
@@ -300,7 +318,7 @@ fn every_monitor_gets_a_workspace_back_when_every_workspace_is_kept_alive() {
         &every_workspace_kept_alive_config(),
     );
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     for outcome in &outcomes {
         eprintln!(
@@ -331,7 +349,7 @@ fn a_hung_test_window_does_not_stop_glazewm_managing_the_others() {
     };
     let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     let observations: Vec<_> = outcomes.iter().map(|o| o.observation.clone()).collect();
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
@@ -377,7 +395,7 @@ fn glazewm_keeps_no_short_lived_window_after_a_burst() {
     };
     let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed; 7]);
@@ -415,7 +433,7 @@ fn glazewm_tracks_losing_every_display_under_cpu_and_memory_load() {
     };
     let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed; 10]);
@@ -465,7 +483,7 @@ fn glazewm_answers_ipc_after_a_startup_command_fails() {
         &glazewm_config,
     );
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed]);
@@ -496,7 +514,7 @@ fn reports_a_glazewm_that_exits_as_not_running() {
         &glazewm_config,
     );
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts[0], StepVerdict::Passed);
@@ -523,7 +541,7 @@ fn zebar_keeps_running_across_monitor_count_changes() {
     };
     let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config()).with_zebar(zebar());
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed; 5]);
@@ -546,7 +564,7 @@ fn a_click_brings_the_clicked_test_window_to_the_foreground() {
     };
     let mut guest = guest("glazewm-config.yaml", &quiet_glazewm_config());
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(
@@ -576,7 +594,7 @@ fn every_monitor_displays_a_workspace_after_switching_projections() {
         &mostly_kept_alive_config(),
     );
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     let displays: Vec<_> = outcomes
         .iter()
@@ -622,7 +640,7 @@ fn every_monitor_displays_a_workspace_when_workspaces_move_between_projection_sw
         &mostly_kept_alive_config(),
     );
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed; 11]);
@@ -657,7 +675,7 @@ fn every_monitor_displays_a_workspace_when_monitors_unplug_while_unused_and_retu
         &mostly_kept_alive_config(),
     );
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed; 7]);
@@ -691,7 +709,7 @@ fn every_monitor_displays_a_workspace_when_monitors_flap_around_projection_switc
         &mostly_kept_alive_config(),
     );
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     let verdicts: Vec<_> = outcomes.into_iter().map(|o| o.verdict).collect();
     assert_eq!(verdicts, vec![StepVerdict::Passed; 7]);
@@ -732,7 +750,7 @@ fn every_monitor_displays_a_workspace_after_moving_its_only_workspace_away_with_
         &no_spare_workspace_config(),
     );
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     for outcome in &outcomes {
         eprintln!("{:?}\n{:#?}", outcome.verdict, outcome.observation);
@@ -774,7 +792,7 @@ fn every_monitor_displays_a_workspace_when_monitors_return_to_workspaces_that_ke
         &no_spare_workspace_config(),
     );
 
-    let outcomes = run(&scenario, &mut guest, &mut SystemClock::start(), SETTLE).unwrap();
+    let outcomes = run_keeping_logs(&scenario, &mut guest);
 
     for outcome in &outcomes {
         eprintln!("{:?}\n{:#?}", outcome.verdict, outcome.observation);

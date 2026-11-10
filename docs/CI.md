@@ -18,6 +18,8 @@ The Windows jobs build the guest daemon, the test-window application and the loa
 
 The live job then runs `ci/run-live.sh` with each expectations file in turn on the runner. The script runs every live scenario on its own, one after another on the one guest. A scenario listed as `fails` has to fail, one listed as `varies` is not run, and every other scenario has to pass. A scenario that reproduces a bug glazewm or zebar still has upstream is listed as `fails` in `upstream.txt` and passes on `all-fixes`, so one run shows the bug and its fix.
 
+After each scenario the logs glazewm, zebar and the guest daemon wrote in the guest are copied to `target/vmtest/logs/<scenario>`, and the job uploads them as the artifact `logs-<expectations file name>`, whether the scenarios passed or not.
+
 The live workflow has no `pull_request` trigger, so a pull request does not run the live scenarios with the code it brings. That alone does not keep a pull request off the runner: on a `pull_request` event GitHub runs the workflows of the pull request itself, so a pull request that adds a workflow with `runs-on: vmtest-kvm` runs it on the runner. Whoever can open a pull request whose workflows run can therefore run code on `vmtest-kvm`: on a private repository its collaborators, and on a public repository anyone whose pull request from a fork the repository's approval setting for outside contributors lets run.
 
 ## The self-hosted runner
