@@ -258,7 +258,9 @@ mod relay_tests {
         let (source, mut program_output) = std::io::pipe().unwrap();
         let (sink, release, written) = held_sink();
         relay(source, sink);
-        let output = (0..OUTPUT_SIZE).map(|i| (i % 251) as u8).collect::<Vec<_>>();
+        let output = (0..OUTPUT_SIZE)
+            .map(|i| (i % 251) as u8)
+            .collect::<Vec<_>>();
         let writer = {
             let output = output.clone();
             std::thread::spawn(move || program_output.write_all(&output))
@@ -274,7 +276,12 @@ mod relay_tests {
             }
         }
 
-        assert!(received == output, "received {} of {} bytes, or out of order", received.len(), output.len());
+        assert!(
+            received == output,
+            "received {} of {} bytes, or out of order",
+            received.len(),
+            output.len()
+        );
     }
 }
 
